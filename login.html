@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登入 - 護理站 AI 排班系統</title>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    
+    <style>
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+        
+        .login-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 48px;
+            width: 100%;
+            max-width: 420px;
+        }
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .login-logo {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            color: white;
+        }
+        
+        .login-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin: 0 0 8px 0;
+        }
+        
+        .login-subtitle {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .form-group {
+            margin-bottom: 24px;
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: all 0.3s;
+            box-sizing: border-box;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .form-input.error {
+            border-color: #ef4444;
+        }
+        
+        .error-message {
+            color: #ef4444;
+            font-size: 13px;
+            margin-top: 6px;
+            display: none;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-login:active {
+            transform: translateY(0);
+        }
+        
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .login-footer {
+            margin-top: 32px;
+            text-align: center;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .demo-info {
+            margin-top: 24px;
+            padding: 16px;
+            background: #f0f4ff;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        .demo-info strong {
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <!-- Header -->
+            <div class="login-header">
+                <div class="login-logo">🏥</div>
+                <h1 class="login-title">護理站排班系統</h1>
+                <p class="login-subtitle">AI 智能排班解決方案</p>
+            </div>
+            
+            <!-- Login Form -->
+            <form id="login-form">
+                <div class="form-group">
+                    <label class="form-label" for="email">電子郵件</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        class="form-input" 
+                        placeholder="請輸入電子郵件"
+                        required
+                        autocomplete="email"
+                    >
+                    <div class="error-message" id="email-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="password">密碼</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        class="form-input" 
+                        placeholder="請輸入密碼"
+                        required
+                        autocomplete="current-password"
+                    >
+                    <div class="error-message" id="password-error"></div>
+                </div>
+                
+                <button type="submit" class="btn-login" id="login-btn">
+                    登入
+                </button>
+            </form>
+            
+            <!-- Demo Info -->
+            <div class="demo-info">
+                <strong>🎯 測試帳號:</strong><br>
+                管理者: admin@hospital.com<br>
+                排班者: scheduler@hospital.com<br>
+                一般使用者: user@hospital.com<br>
+                密碼: 任意輸入 (Demo 模式)
+            </div>
+            
+            <!-- Footer -->
+            <div class="login-footer">
+                © 2025 護理站 AI 排班系統 v1.0
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知容器 -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <!-- 載入必要的 JS -->
+    <script src="js/config/constants.js"></script>
+    <script src="js/config/firebase.config.js"></script>
+    <script src="js/core/utils.js"></script>
+    <script src="js/core/storage.js"></script>
+    <script src="js/components/notification.js"></script>
+    <script src="js/services/firebase.service.js"></script>
+    <script src="js/core/auth.js"></script>
+    
+    <script>
+        // 登入頁面邏輯
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 初始化 Firebase
+            await FirebaseService.init();
+            
+            // 檢查是否已登入
+            const currentUser = Auth.getCurrentUser();
+            if (currentUser) {
+                window.location.href = 'index.html';
+                return;
+            }
+            
+            // 登入表單處理
+            const loginForm = document.getElementById('login-form');
+            const loginBtn = document.getElementById('login-btn');
+            const emailInput = document.getElementById('email');
+            const passwordInput = document.getElementById('password');
+            
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                // 清除錯誤訊息
+                document.querySelectorAll('.error-message').forEach(el => {
+                    el.classList.remove('show');
+                });
+                document.querySelectorAll('.form-input').forEach(el => {
+                    el.classList.remove('error');
+                });
+                
+                const email = emailInput.value.trim();
+                const password = passwordInput.value;
+                
+                // 基本驗證
+                if (!email) {
+                    showError('email', '請輸入電子郵件');
+                    return;
+                }
+                
+                if (!password) {
+                    showError('password', '請輸入密碼');
+                    return;
+                }
+                
+                // 登入
+                loginBtn.disabled = true;
+                loginBtn.textContent = '登入中...';
+                
+                try {
+                    const user = await Auth.login(email, password);
+                    
+                    if (user) {
+                        Notification.show('登入成功!', 'success');
+                        
+                        // 延遲跳轉,讓使用者看到成功訊息
+                        setTimeout(() => {
+                            window.location.href = 'index.html';
+                        }, 500);
+                    }
+                } catch (error) {
+                    console.error('登入失敗:', error);
+                    Notification.show(error.message || '登入失敗，請檢查帳號密碼', 'error');
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = '登入';
+                }
+            });
+            
+            // 顯示錯誤訊息
+            function showError(field, message) {
+                const input = document.getElementById(field);
+                const error = document.getElementById(`${field}-error`);
+                
+                input.classList.add('error');
+                error.textContent = message;
+                error.classList.add('show');
+            }
+        });
+    </script>
+</body>
+</html>
