@@ -78,8 +78,14 @@ https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/m
 - [x] `css/components.css` - 元件樣式
 - [x] `css/responsive.css` - 響應式設計
 
+https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/main/css/components.css
+https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/main/css/main.css
+https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/main/css/responsive.css
+
+
 #### 📁 應用程式
 - [x] `js/app.js` - 應用程式進入點
+https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/main/js/app.js
 
 **功能:**
 - ✅ Firebase Authentication (Email/密碼登入)
@@ -149,7 +155,7 @@ https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/m
 - [x] `pages/settings.html` - 設定管理頁面
 
 #### 📁 Google Apps Script
-- [x] `gas/settings-api.gs` - 設定檔 API
+- [X] `gas/settings-api.gs` - 設定檔 API
 
 **功能:**
 - ✅ 班別管理 (CRUD、順序、顏色)
@@ -201,33 +207,33 @@ https://raw.githubusercontent.com/charlesliao-stock/AIshiftschedule/refs/heads/m
 ### 🔄 Week 5: 預班功能
 
 #### 📁 服務層
-- [ ] `js/services/pre-schedule.service.js` - 預班服務
+- [x ] `js/services/pre-schedule.service.js` - 預班服務
 
 #### 📁 預班模組
-- [ ] `js/modules/pre-schedule/pre-schedule.js` - 預班主檔
-- [ ] `js/modules/pre-schedule/pre-schedule-view.js` - 預班查看
-- [ ] `js/modules/pre-schedule/pre-schedule-submit.js` - 預班提交 (一般使用者)
-- [ ] `js/modules/pre-schedule/pre-schedule-extra.js` - 額外預班 (排班者)
-- [ ] `js/modules/pre-schedule/pre-schedule-config.js` - 預班設定
+- [x] `js/modules/pre-schedule/pre-schedule.js` - 預班主檔
+- [x] `js/modules/pre-schedule/pre-schedule-view.js` - 預班查看
+- [x] `js/modules/pre-schedule/pre-schedule-submit.js` - 預班提交 (一般使用者)
+- [x] `js/modules/pre-schedule/pre-schedule-extra.js` - 額外預班 (排班者)
+- [x] `js/modules/pre-schedule/pre-schedule-config.js` - 預班設定
 
 #### 📁 頁面
-- [] `pages/pre-schedule.html` - 預班管理頁面
+- [x] `pages/pre-schedule.html` - 預班管理頁面
 
 #### 📁 Google Apps Script
-- [ ] `gas/pre-schedule-api.gs` - 預班表 API
+- [x ] `gas/pre-schedule-api.gs` - 預班表 API
 
 **功能:**
-- [ ] 預班表格顯示 (含前月後6天灰色)
-- [ ] 預班開放/截止日期控制
-- [ ] 預班狀態顯示 (open/closed/locked)
-- [ ] 預班提交介面 (點擊選擇班別)
-- [ ] 預班次數即時統計
-- [ ] 每月上限檢查
-- [ ] 每日上限檢查 (警告但允許)
-- [ ] 額外預班功能 (排班者視角)
-- [ ] 額外預班標記 (⭐) 不計入限額
-- [ ] 預班衝突檢測
-- [ ] 預班完成度儀表板
+- ✅ 預班表格顯示 (含前月後6天灰色)
+- ✅ 預班開放/截止日期控制
+- ✅ 預班狀態顯示 (open/closed/locked)
+- ✅ 預班提交介面 (點擊選擇班別)
+- ✅ 預班次數即時統計
+- ✅ 每月上限檢查
+- ✅ 每日上限檢查 (警告但允許)
+- ✅ 額外預班功能 (排班者視角)
+- ✅ 額外預班標記 (⭐) 不計入限額
+- ✅預班衝突檢測
+- ✅ 預班完成度儀表板
 
 ---
 
