@@ -1,37 +1,36 @@
 /**
- * Google Sheets 服務
- * 與 Google Apps Script API 溝通
+ * js/services/sheets.service.js
+ * Google Sheets 服務 (ES Module 版)
  */
 
-const SheetsService = {
-    baseUrl: API_CONFIG.baseUrl,
+import { API_CONFIG } from '../config/api.config.js';
+import { CONSTANTS } from '../config/constants.js'; // 假設 demo data 在這裡或直接寫死
+import { Utils } from '../core/utils.js';
+
+export const SheetsService = {
+    // 引用 API_CONFIG.BASE_URL
+    baseUrl: API_CONFIG.BASE_URL,
     requestCache: new Map(),
     cacheTimeout: 5 * 60 * 1000, // 5 分鐘快取
     
     // ==================== 基礎請求方法 ====================
     
-    /**
-     * 發送請求到 Apps Script
-     * @param {string} endpoint - API 端點
-     * @param {Object} data - 請求資料
-     * @param {Object} options - 選項
-     * @returns {Promise<Object>}
-     */
     async request(endpoint, data = {}, options = {}) {
         const {
             method = 'POST',
             useCache = false,
-            timeout = API_CONFIG.request.timeout
+            timeout = API_CONFIG.REQUEST?.TIMEOUT || 30000
         } = options;
         
         // Demo 模式
-        if (API_CONFIG.demo.enabled) {
+        if (API_CONFIG.DEMO?.ENABLED) {
             return await this.mockRequest(endpoint, data);
         }
         
-        // 檢查快取
-        if (useCache && method === 'GET') {
-            const cached = this.getCache(endpoint, data);
+        // 檢查快取 (僅限 action 請求且明確要求快取)
+        const cacheKey = this.getCacheKey(endpoint, data);
+        if (useCache && method === 'POST') { // GAS 統一用 POST
+            const cached = this.getCache(cacheKey);
             if (cached) {
                 console.log('[Sheets] 使用快取:', endpoint);
                 return cached;
@@ -39,15 +38,20 @@ const SheetsService = {
         }
         
         try {
-            const url = this.baseUrl + endpoint;
+            // GAS 只有一個網址，endpoint 其實是 action 參數
+            // 我們將 endpoint 視為 action 塞入 payload
+            const payload = {
+                action: endpoint,
+                ...data
+            };
             
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), timeout);
             
-            const response = await fetch(url, {
-                method,
-                headers: API_CONFIG.request.headers,
-                body: method === 'POST' ? JSON.stringify(data) : undefined,
+            const response = await fetch(this.baseUrl, {
+                method: 'POST',
+                headers: API_CONFIG.REQUEST?.HEADERS || { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload),
                 signal: controller.signal
             });
             
@@ -59,393 +63,86 @@ const SheetsService = {
             
             const result = await response.json();
             
-            // 檢查 Apps Script 回傳的錯誤
-            if (result.error) {
-                throw new Error(result.error);
+            // 檢查業務邏輯錯誤
+            if (result.status === 'error' || result.success === false) {
+                throw new Error(result.message || result.error || 'Unknown Error');
             }
             
             // 儲存快取
-            if (useCache && method === 'GET') {
-                this.setCache(endpoint, data, result);
+            if (useCache) {
+                this.setCache(cacheKey, result);
             }
             
             return result;
             
         } catch (error) {
             console.error('[Sheets] 請求失敗:', error);
-            
-            if (error.name === 'AbortError') {
-                throw new Error('請求逾時，請稍後再試');
-            }
-            
+            if (error.name === 'AbortError') throw new Error('請求逾時，請稍後再試');
             throw error;
         }
     },
     
-    /**
-     * GET 請求
-     * @param {string} endpoint - API 端點
-     * @param {Object} params - 查詢參數
-     * @returns {Promise<Object>}
-     */
-    async get(endpoint, params = {}) {
-        const queryString = new URLSearchParams(params).toString();
-        const url = queryString ? `${endpoint}?${queryString}` : endpoint;
-        return await this.request(url, {}, { method: 'GET', useCache: true });
-    },
-    
-    /**
-     * POST 請求
-     * @param {string} endpoint - API 端點
-     * @param {Object} data - 請求資料
-     * @returns {Promise<Object>}
-     */
-    async post(endpoint, data = {}) {
-        return await this.request(endpoint, data, { method: 'POST' });
+    // 簡化介面：直接呼叫 post (因為 GAS Web App 主要是 POST)
+    async post(action, data = {}) {
+        return await this.request(action, data, { method: 'POST' });
     },
     
     // ==================== 快取管理 ====================
     
-    /**
-     * 取得快取
-     * @param {string} endpoint - 端點
-     * @param {Object} data - 資料
-     * @returns {Object|null}
-     */
-    getCache(endpoint, data = {}) {
-        const key = this.getCacheKey(endpoint, data);
+    getCache(key) {
         const cached = this.requestCache.get(key);
-        
         if (!cached) return null;
-        
-        // 檢查是否過期
         if (Date.now() - cached.timestamp > this.cacheTimeout) {
             this.requestCache.delete(key);
             return null;
         }
-        
         return cached.data;
     },
     
-    /**
-     * 設定快取
-     * @param {string} endpoint - 端點
-     * @param {Object} data - 資料
-     * @param {Object} result - 結果
-     */
-    setCache(endpoint, data, result) {
-        const key = this.getCacheKey(endpoint, data);
+    setCache(key, result) {
         this.requestCache.set(key, {
             data: result,
             timestamp: Date.now()
         });
     },
     
-    /**
-     * 清除快取
-     * @param {string} endpoint - 端點 (選填，不提供則清除所有)
-     */
-    clearCache(endpoint = null) {
-        if (endpoint) {
-            // 清除特定端點的所有快取
+    clearCache(prefix = null) {
+        if (prefix) {
             for (const key of this.requestCache.keys()) {
-                if (key.startsWith(endpoint)) {
-                    this.requestCache.delete(key);
-                }
+                if (key.includes(prefix)) this.requestCache.delete(key);
             }
         } else {
-            // 清除所有快取
             this.requestCache.clear();
         }
     },
     
-    /**
-     * 取得快取鍵值
-     * @param {string} endpoint - 端點
-     * @param {Object} data - 資料
-     * @returns {string}
-     */
     getCacheKey(endpoint, data) {
         return endpoint + ':' + JSON.stringify(data);
     },
     
     // ==================== Demo 模式模擬 ====================
     
-    /**
-     * 模擬 API 請求 (Demo 模式)
-     * @param {string} endpoint - 端點
-     * @param {Object} data - 資料
-     * @returns {Promise<Object>}
-     */
-    async mockRequest(endpoint, data) {
-        console.log('[Sheets] Demo 模式請求:', endpoint, data);
+    async mockRequest(action, data) {
+        console.log('[Sheets] Demo 模式請求:', action, data);
+        await Utils.sleep(API_CONFIG.DEMO?.MOCK_DELAY || 500);
         
-        // 模擬網路延遲
-        await Utils.sleep(API_CONFIG.demo.mockDelay);
+        // 簡單的路由模擬
+        if (action.includes('Unit')) return this.mockUnitRequest(action, data);
+        if (action.includes('Settings')) return { success: true, message: '設定儲存成功' };
         
-        // 根據端點返回模擬資料
-        if (endpoint.includes('/unit/create')) {
-            return this.mockCreateUnit(data);
-        }
-        
-        if (endpoint.includes('/unit/list')) {
-            return this.mockListUnits();
-        }
-        
-        if (endpoint.includes('/unit/update')) {
-            return this.mockUpdateUnit(data);
-        }
-        
-        if (endpoint.includes('/unit/delete')) {
-            return this.mockDeleteUnit(data);
-        }
-        
-        // 設定相關
-        if (endpoint.includes('/settings/')) {
-            return this.mockSettingsRequest(endpoint, data);
-        }
-        
-        // 預設回應
-        return {
-            success: true,
-            message: 'Demo 模式操作成功',
-            data: null
-        };
+        return { success: true, message: 'Demo 模式操作成功', data: null };
     },
     
-    /**
-     * 模擬創建單位
-     */
-    async mockCreateUnit(data) {
-        const unitId = 'unit_' + Utils.generateId();
-        
-        return {
-            success: true,
-            message: '單位創建成功',
-            data: {
-                unit_id: unitId,
-                unit_code: data.unit_code,
-                unit_name: data.unit_name,
-                settings_sheet_id: 'sheet_' + Utils.generateId(),
-                settings_sheet_url: 'https://docs.google.com/spreadsheets/d/demo_settings',
-                pre_schedule_sheet_id: 'sheet_' + Utils.generateId(),
-                pre_schedule_sheet_url: 'https://docs.google.com/spreadsheets/d/demo_pre_schedule',
-                schedule_sheet_id: 'sheet_' + Utils.generateId(),
-                schedule_sheet_url: 'https://docs.google.com/spreadsheets/d/demo_schedule',
-                created_at: new Date().toISOString()
-            }
-        };
-    },
-    
-    /**
-     * 模擬列出單位
-     */
-    async mockListUnits() {
-        const demoUnits = [
-            {
-                unit_id: 'unit_9b',
-                unit_code: '9B',
-                unit_name: '9B病房',
-                total_staff: 20,
-                admin_users: ['admin@hospital.com'],
-                scheduler_users: ['scheduler@hospital.com'],
-                settings_sheet_url: 'https://docs.google.com/spreadsheets/d/demo_9b_settings',
-                status: 'active',
-                created_at: '2024-01-01T00:00:00.000Z'
-            },
-            {
-                unit_id: 'unit_8a',
-                unit_code: '8A',
-                unit_name: '8A病房',
-                total_staff: 18,
-                admin_users: ['admin@hospital.com'],
-                scheduler_users: ['scheduler2@hospital.com'],
-                settings_sheet_url: 'https://docs.google.com/spreadsheets/d/demo_8a_settings',
-                status: 'active',
-                created_at: '2024-02-01T00:00:00.000Z'
-            },
-            {
-                unit_id: 'unit_7c',
-                unit_code: '7C',
-                unit_name: '7C病房',
-                total_staff: 22,
-                admin_users: ['admin@hospital.com'],
-                scheduler_users: ['scheduler3@hospital.com'],
-                settings_sheet_url: 'https://docs.google.com/spreadsheets/d/demo_7c_settings',
-                status: 'active',
-                created_at: '2024-03-01T00:00:00.000Z'
-            }
-        ];
-        
-        return {
-            success: true,
-            data: demoUnits
-        };
-    },
-    
-    /**
-     * 模擬更新單位
-     */
-    async mockUpdateUnit(data) {
-        return {
-            success: true,
-            message: '單位更新成功',
-            data: {
-                ...data,
-                updated_at: new Date().toISOString()
-            }
-        };
-    },
-    
-    /**
-     * 模擬刪除單位
-     */
-    async mockDeleteUnit(data) {
-        return {
-            success: true,
-            message: '單位刪除成功'
-        };
-    },
-    
-    /**
-     * 模擬設定請求
-     */
-    async mockSettingsRequest(endpoint, data) {
-        // 如果是讀取
-        if (endpoint.includes('get') || !data || Object.keys(data).length === 0) {
-            if (endpoint.includes('shifts')) {
-                return {
-                    success: true,
-                    data: CONSTANTS.DEFAULT_SHIFTS
-                };
-            }
-            
-            if (endpoint.includes('groups')) {
-                return {
-                    success: true,
-                    data: CONSTANTS.DEFAULT_GROUPS
-                };
-            }
-            
-            if (endpoint.includes('rules')) {
-                return {
-                    success: true,
-                    data: CONSTANTS.DEFAULT_RULES
-                };
-            }
-            
-            if (endpoint.includes('staff')) {
-                return {
-                    success: true,
-                    data: [
-                        {
-                            id: 1,
-                            employee_id: '930462',
-                            name: '廖苡凱',
-                            level: 'N4',
-                            shifts: ['大', '小', '白'],
-                            group: '資深組',
-                            max_consecutive_days: 6,
-                            is_package: true,
-                            package_type: '大夜',
-                            email: 'staff1@hospital.com',
-                            status: '在職'
-                        },
-                        {
-                            id: 2,
-                            employee_id: '830330',
-                            name: '鍾淑英',
-                            level: 'N3',
-                            shifts: ['大', '小', '白', 'DL'],
-                            group: '資深組',
-                            max_consecutive_days: 6,
-                            is_package: false,
-                            package_type: '',
-                            email: 'staff2@hospital.com',
-                            status: '在職'
-                        }
-                    ]
-                };
-            }
+    async mockUnitRequest(action, data) {
+        if (action === 'getUnitList') {
+            return {
+                success: true,
+                data: [
+                    { unit_id: 'unit_9b', unit_name: '9B病房', unit_code: '9B' },
+                    { unit_id: 'unit_8a', unit_name: '8A病房', unit_code: '8A' }
+                ]
+            };
         }
-        
-        // 如果是儲存
-        return {
-            success: true,
-            message: '設定儲存成功'
-        };
-    },
-    
-    // ==================== 重試機制 ====================
-    
-    /**
-     * 帶重試的請求
-     * @param {Function} requestFn - 請求函式
-     * @param {number} maxRetries - 最大重試次數
-     * @returns {Promise<Object>}
-     */
-    async requestWithRetry(requestFn, maxRetries = API_CONFIG.request.retryTimes) {
-        let lastError;
-        
-        for (let i = 0; i <= maxRetries; i++) {
-            try {
-                return await requestFn();
-            } catch (error) {
-                lastError = error;
-                
-                if (i < maxRetries) {
-                    console.log(`[Sheets] 請求失敗，重試 ${i + 1}/${maxRetries}...`);
-                    await Utils.sleep(API_CONFIG.request.retryDelay * (i + 1));
-                }
-            }
-        }
-        
-        throw lastError;
-    },
-    
-    // ==================== 批次請求 ====================
-    
-    /**
-     * 批次請求 (並行)
-     * @param {Array} requests - 請求陣列 [{endpoint, data}, ...]
-     * @returns {Promise<Array>}
-     */
-    async batchRequest(requests) {
-        const promises = requests.map(req => 
-            this.request(req.endpoint, req.data, req.options)
-        );
-        
-        try {
-            return await Promise.all(promises);
-        } catch (error) {
-            console.error('[Sheets] 批次請求失敗:', error);
-            throw error;
-        }
-    },
-    
-    /**
-     * 批次請求 (順序)
-     * @param {Array} requests - 請求陣列
-     * @returns {Promise<Array>}
-     */
-    async sequentialRequest(requests) {
-        const results = [];
-        
-        for (const req of requests) {
-            try {
-                const result = await this.request(req.endpoint, req.data, req.options);
-                results.push(result);
-            } catch (error) {
-                console.error('[Sheets] 順序請求失敗:', error);
-                results.push({ error: error.message });
-            }
-        }
-        
-        return results;
+        return { success: true, message: '操作成功' };
     }
 };
-
-// 讓 Sheets 服務可在全域使用
-if (typeof window !== 'undefined') {
-    window.SheetsService = SheetsService;
-}

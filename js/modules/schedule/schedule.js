@@ -1,8 +1,22 @@
 /**
- * 排班管理主模組
+ * js/modules/schedule/schedule.js
+ * 排班管理主模組 (ES Module 版 - 完整實作)
  */
 
-const ScheduleManagement = {
+import { Auth } from '../../core/auth.js';
+import { Notification } from '../../components/notification.js';
+import { Loading } from '../../components/loading.js';
+import { Modal } from '../../components/modal.js';
+import { SheetsService } from '../../services/sheets.service.js';
+import { API_CONFIG } from '../../config/api.config.js';
+import { Schedule } from '../../models/schedule.model.js';
+import { Staff } from '../../models/staff.model.js';
+import { Shift } from '../../models/shift.model.js';
+import { ScheduleView } from './schedule-view.js';
+import { ManualSchedule } from './manual-schedule.js';
+import { AISchedule } from './ai-schedule.js'; // Week 6 (簡易版 Week 4)
+
+export const ScheduleManagement = {
     unitId: null,
     currentYear: new Date().getFullYear(),
     currentMonth: new Date().getMonth() + 1,
@@ -16,7 +30,8 @@ const ScheduleManagement = {
         console.log('[ScheduleManagement] 初始化排班管理');
         
         const user = Auth.getCurrentUser();
-        this.unitId = user.unit_id;
+        // 注意：這裡使用 user.unit_id 還是 user.unitId 取決於 Auth 的實作，建議統一
+        this.unitId = user.unit_id || user.unitId;
         
         if (!this.unitId) {
             Notification.error('找不到所屬單位');
@@ -30,20 +45,20 @@ const ScheduleManagement = {
     
     render() {
         const mainContent = document.getElementById('main-content');
+        if (!mainContent) return;
+
         const user = Auth.getCurrentUser();
         const canEdit = Auth.isAdmin() || Auth.isScheduler();
         
         mainContent.innerHTML = `
             <div class="schedule-page">
-                <!-- Header -->
                 <div class="page-header" style="margin-bottom: 24px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <h1 style="font-size: 28px; font-weight: 700; margin: 0 0 8px 0;">排班管理</h1>
-                            <p style="color: #666; margin: 0;">${user.unit_name}</p>
+                            <p style="color: #666; margin: 0;">${user.unit_name || ''}</p>
                         </div>
                         <div style="display: flex; gap: 12px; align-items: center;">
-                            <!-- 月份選擇 -->
                             <select id="year-select" class="form-select" style="width: 100px;">
                                 <option value="${this.currentYear - 1}">${this.currentYear - 1}</option>
                                 <option value="${this.currentYear}" selected>${this.currentYear}</option>
@@ -67,7 +82,6 @@ const ScheduleManagement = {
                     </div>
                 </div>
                 
-                <!-- 統計卡片 -->
                 <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 24px;">
                     <div class="stat-card">
                         <div class="stat-card-header">
@@ -94,7 +108,6 @@ const ScheduleManagement = {
                     </div>
                 </div>
                 
-                <!-- 主要內容 -->
                 <div class="card">
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="display: flex; gap: 12px;">
@@ -147,24 +160,25 @@ const ScheduleManagement = {
         document.getElementById('view-calendar-btn')?.addEventListener('click', () => {
             this.viewMode = 'calendar';
             this.renderScheduleContent();
+            // 更新按鈕樣式
+            document.getElementById('view-calendar-btn').className = 'btn btn-sm btn-primary';
+            document.getElementById('view-list-btn').className = 'btn btn-sm btn-secondary';
         });
         
         document.getElementById('view-list-btn')?.addEventListener('click', () => {
             this.viewMode = 'list';
             this.renderScheduleContent();
+            document.getElementById('view-calendar-btn').className = 'btn btn-sm btn-secondary';
+            document.getElementById('view-list-btn').className = 'btn btn-sm btn-primary';
         });
         
         // 排班操作
         document.getElementById('manual-schedule-btn')?.addEventListener('click', () => {
-            if (window.ManualSchedule) {
-                ManualSchedule.open(this.schedule, this.staffList, this.shifts);
-            }
+            ManualSchedule.open(this.schedule, this.staffList, this.shifts);
         });
         
         document.getElementById('ai-schedule-btn')?.addEventListener('click', () => {
-            if (window.AISchedule) {
-                AISchedule.open(this.schedule, this.staffList, this.shifts);
-            }
+            AISchedule.open(this.schedule, this.staffList, this.shifts);
         });
         
         document.getElementById('clear-schedule-btn')?.addEventListener('click', () => {
@@ -178,10 +192,12 @@ const ScheduleManagement = {
     
     async loadDependencies() {
         try {
+            // 注意：這裡使用 API_CONFIG.ENDPOINTS.SETTINGS... 
+            // 需確保 api.config.js 的結構正確，如果結構有變，請調整這裡
             const [staffResult, shiftsResult, holidaysResult] = await Promise.all([
-                SheetsService.post(API_CONFIG.endpoints.settings.getStaff, { unit_id: this.unitId }),
-                SheetsService.post(API_CONFIG.endpoints.settings.getShifts, { unit_id: this.unitId }),
-                SheetsService.post(API_CONFIG.endpoints.settings.getHolidays, { unit_id: this.unitId })
+                SheetsService.post(API_CONFIG.ENDPOINTS.SETTINGS.GET_STAFF, { unit_id: this.unitId }),
+                SheetsService.post(API_CONFIG.ENDPOINTS.SETTINGS.GET_SHIFTS, { unit_id: this.unitId }),
+                SheetsService.post(API_CONFIG.ENDPOINTS.SETTINGS.GET_HOLIDAYS, { unit_id: this.unitId })
             ]);
             
             this.staffList = staffResult.success && staffResult.data ? staffResult.data.map(s => Staff.fromObject(s)) : [];
@@ -189,7 +205,8 @@ const ScheduleManagement = {
             this.holidays = holidaysResult.success && holidaysResult.data ? holidaysResult.data : [];
             
             // 更新統計
-            document.getElementById('total-staff').textContent = this.staffList.length;
+            const totalStaffEl = document.getElementById('total-staff');
+            if (totalStaffEl) totalStaffEl.textContent = this.staffList.length;
             
         } catch (error) {
             console.error('[ScheduleManagement] 載入依賴資料失敗:', error);
@@ -202,7 +219,7 @@ const ScheduleManagement = {
             Loading.show('載入排班表...');
             
             const result = await SheetsService.post(
-                API_CONFIG.endpoints.schedule.get,
+                API_CONFIG.ENDPOINTS.SCHEDULE.GET,
                 {
                     unit_id: this.unitId,
                     year: this.currentYear,
@@ -233,19 +250,16 @@ const ScheduleManagement = {
     
     renderScheduleContent() {
         const container = document.getElementById('schedule-content-container');
+        if (!container) return;
         
         if (this.viewMode === 'calendar') {
-            if (window.ScheduleView) {
-                ScheduleView.renderCalendar(
-                    container,
-                    this.schedule,
-                    this.staffList,
-                    this.shifts,
-                    this.holidays
-                );
-            } else {
-                container.innerHTML = '<div class="card-body"><p>日曆視圖載入中...</p></div>';
-            }
+            ScheduleView.renderCalendar(
+                container,
+                this.schedule,
+                this.staffList,
+                this.shifts,
+                this.holidays
+            );
         } else {
             container.innerHTML = '<div class="card-body"><p>列表視圖開發中...</p></div>';
         }
@@ -319,7 +333,7 @@ const ScheduleManagement = {
     async saveSchedule() {
         try {
             const result = await SheetsService.post(
-                API_CONFIG.endpoints.schedule.save,
+                API_CONFIG.ENDPOINTS.SCHEDULE.SAVE,
                 {
                     unit_id: this.unitId,
                     schedule: this.schedule.toObject()
@@ -330,7 +344,7 @@ const ScheduleManagement = {
                 throw new Error(result.message || '儲存失敗');
             }
             
-            SheetsService.clearCache('/schedule/get');
+            SheetsService.clearCache('getSchedule'); // 清除快取
             
         } catch (error) {
             console.error('[ScheduleManagement] 儲存失敗:', error);
@@ -343,7 +357,3 @@ const ScheduleManagement = {
         Notification.success('已重新載入');
     }
 };
-
-if (typeof window !== 'undefined') {
-    window.ScheduleManagement = ScheduleManagement;
-}

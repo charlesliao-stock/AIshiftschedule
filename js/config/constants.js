@@ -1,9 +1,10 @@
 /**
- * 護理站 AI 排班系統 - 系統常數
+ * js/config/constants.js
+ * 護理站 AI 排班系統 - 系統常數 (ES Module 版)
  * 定義所有系統使用的常數
  */
 
-const CONSTANTS = {
+export const CONSTANTS = {
     // ==================== 系統資訊 ====================
     SYSTEM: {
         NAME: '護理站 AI 排班系統',
@@ -380,8 +381,3 @@ const CONSTANTS = {
 
     WEEKDAYS_SHORT: ['日', '一', '二', '三', '四', '五', '六']
 };
-
-// 讓常數可在全域使用
-if (typeof window !== 'undefined') {
-    window.CONSTANTS = CONSTANTS;
-}

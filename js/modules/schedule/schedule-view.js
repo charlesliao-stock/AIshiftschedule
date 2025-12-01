@@ -1,9 +1,18 @@
 /**
- * 排班視圖模組
- * 顯示排班表格
+ * js/modules/schedule/schedule-view.js
+ * 排班視圖模組 (ES Module 版 - 完整實作)
  */
 
-const ScheduleView = {
+import { Auth } from '../../core/auth.js';
+import { Notification } from '../../components/notification.js';
+import { Modal } from '../../components/modal.js';
+import { CONSTANTS } from '../../config/constants.js';
+// 注意：這裡引用 ScheduleManagement 是為了呼叫 saveSchedule
+// 為了避免循環引用，建議在 init 時傳入 saveCallback，或動態 import
+// 這裡簡單起見，假設 ScheduleManagement 已載入並掛載，或使用動態引入
+import { ScheduleManagement } from './schedule.js'; 
+
+export const ScheduleView = {
     
     /**
      * 渲染日曆視圖
@@ -37,7 +46,7 @@ const ScheduleView = {
         allDates.forEach((date, index) => {
             const d = new Date(date);
             const day = d.getDate();
-            const weekday = CONSTANTS.WEEKDAYS_SHORT[d.getDay()];
+            const weekday = CONSTANTS.WEEKDAYS_SHORT?.[d.getDay()] || '';
             const isHoliday = schedule.isHoliday(date, holidays);
             const isPrevMonth = index < prevDates.length;
             const cellClass = isHoliday ? 'holiday' : (d.getDay() === 0 || d.getDay() === 6) ? 'weekend' : '';
@@ -124,15 +133,15 @@ const ScheduleView = {
      * 綁定儲存格點擊事件
      */
     bindCellClickEvents(container, schedule, shifts) {
-        const cells = container.querySelectorAll('.schedule-cell:not(.readonly)');
-        
-        cells.forEach(cell => {
-            cell.addEventListener('click', async () => {
-                const staffId = cell.getAttribute('data-staff-id');
-                const date = cell.getAttribute('data-date');
-                
-                await this.showShiftSelector(cell, schedule, staffId, date, shifts);
-            });
+        // 使用事件委派優化效能
+        container.addEventListener('click', async (e) => {
+            const cell = e.target.closest('.schedule-cell');
+            if (!cell || cell.classList.contains('readonly')) return;
+
+            const staffId = cell.getAttribute('data-staff-id');
+            const date = cell.getAttribute('data-date');
+            
+            await this.showShiftSelector(cell, schedule, staffId, date, shifts);
         });
     },
     
@@ -170,6 +179,7 @@ const ScheduleView = {
             
             // 儲存變更
             try {
+                // 直接使用導入的 ScheduleManagement
                 await ScheduleManagement.saveSchedule();
                 
                 // 更新顯示
@@ -189,7 +199,3 @@ const ScheduleView = {
         }
     }
 };
-
-if (typeof window !== 'undefined') {
-    window.ScheduleView = ScheduleView;
-}

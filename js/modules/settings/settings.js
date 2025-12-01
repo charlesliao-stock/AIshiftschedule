@@ -1,227 +1,115 @@
 /**
- * 設定管理主模組
- * 排班者/管理者 - 管理單位的各項設定
+ * js/modules/settings/settings.js
+ * 設定管理主模組 (ES Module 版)
+ * 負責分頁切換與子模組載入
  */
 
-const Settings = {
-    currentTab: 'shifts',
-    unitId: null,
-    
-    // ==================== 初始化 ====================
-    
-    /**
-     * 初始化設定管理
-     */
+import { Auth } from '../../core/auth.js';
+import { Router } from '../../core/router.js';
+import { Notification } from '../../components/notification.js';
+
+// 引入子模組 (假設您會建立這些檔案，若暫時沒有，可先註解)
+import { ShiftManagement } from './shift-management.js';
+import { StaffManagement } from './staff-management.js';
+import { RuleManagement } from './rule-management.js';
+// import { GroupManagement } from './group-management.js';
+// import { HolidayManagement } from './holiday-management.js';
+
+export const Settings = {
+    activeTab: 'shifts',
+
     async init() {
-        console.log('[Settings] 初始化設定管理');
+        console.log('[Settings] 初始化...');
         
-        // 檢查權限
-        if (!Auth.isAdmin() && !Auth.isScheduler()) {
-            Notification.error('您沒有權限存取此頁面');
+        // 檢查權限 (排班者或管理員)
+        if (!Auth.isScheduler() && !Auth.isAdmin()) {
+            Notification.error('您沒有權限存取設定');
             Router.navigate('/dashboard');
             return;
         }
+
+        this.renderLayout();
+        this.bindEvents();
         
-        // 取得當前使用者的單位
-        const user = Auth.getCurrentUser();
-        this.unitId = user.unit_id;
-        
-        if (!this.unitId) {
-            Notification.error('找不到所屬單位');
-            return;
-        }
-        
-        // 渲染介面
-        this.render();
-        
-        // 載入預設分頁
-        this.switchTab(this.currentTab);
+        // 預設載入第一個分頁
+        this.switchTab('shifts');
     },
-    
-    // ==================== 渲染 ====================
-    
-    /**
-     * 渲染主介面
-     */
-    render() {
-        const mainContent = document.getElementById('main-content');
-        const user = Auth.getCurrentUser();
-        
-        mainContent.innerHTML = `
-            <div class="settings-page">
-                <!-- Header -->
-                <div class="page-header" style="margin-bottom: 24px;">
-                    <h1 style="font-size: 28px; font-weight: 700; margin: 0 0 8px 0;">設定管理</h1>
-                    <p style="color: #666; margin: 0;">${user.unit_name} - 排班相關設定</p>
+
+    renderLayout() {
+        const container = document.getElementById('main-content');
+        container.innerHTML = `
+            <div class="page-header">
+                <h1>設定管理</h1>
+            </div>
+            
+            <div class="settings-container">
+                <div class="tabs-nav">
+                    <button class="tab-btn active" data-tab="shifts">班別設定</button>
+                    <button class="tab-btn" data-tab="groups">組別設定</button>
+                    <button class="tab-btn" data-tab="staff">人員管理</button>
+                    <button class="tab-btn" data-tab="rules">排班規則</button>
+                    <button class="tab-btn" data-tab="holidays">假日設定</button>
                 </div>
-                
-                <!-- Tabs -->
-                <div class="tabs" id="settings-tabs">
-                    <button class="tab active" data-tab="shifts">班別管理</button>
-                    <button class="tab" data-tab="groups">組別管理</button>
-                    <button class="tab" data-tab="staff">人員管理</button>
-                    <button class="tab" data-tab="rules">排班規則</button>
-                    <button class="tab" data-tab="holidays">假日設定</button>
-                    <button class="tab" data-tab="notifications">通知設定</button>
-                    <button class="tab" data-tab="labor">勞基法規範</button>
-                </div>
-                
-                <!-- Tab Content -->
-                <div id="settings-content" class="card">
-                    <div class="card-body" style="padding: 60px; text-align: center; color: #999;">
-                        <div class="loader-spinner" style="margin: 0 auto 16px;"></div>
-                        <p>載入中...</p>
-                    </div>
+
+                <div id="settings-content" class="tab-content">
+                    <div class="loader-spinner"></div>
                 </div>
             </div>
         `;
-        
-        // 綁定事件
-        this.bindEvents();
     },
-    
-    /**
-     * 綁定事件
-     */
+
     bindEvents() {
-        // Tab 切換
-        const tabs = document.querySelectorAll('#settings-tabs .tab');
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabName = tab.getAttribute('data-tab');
-                this.switchTab(tabName);
-            });
-        });
-    },
-    
-    /**
-     * 切換分頁
-     */
-    async switchTab(tabName) {
-        console.log('[Settings] 切換到:', tabName);
-        
-        // 更新 active 狀態
-        const tabs = document.querySelectorAll('#settings-tabs .tab');
-        tabs.forEach(tab => {
-            if (tab.getAttribute('data-tab') === tabName) {
-                tab.classList.add('active');
-            } else {
-                tab.classList.remove('active');
+        const nav = document.querySelector('.tabs-nav');
+        nav?.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab-btn')) {
+                const tab = e.target.dataset.tab;
+                this.switchTab(tab);
             }
         });
-        
-        // 更新當前分頁
-        this.currentTab = tabName;
-        
-        // 載入對應內容
+    },
+
+    async switchTab(tabId) {
+        // 更新按鈕狀態
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabId);
+        });
+
         const content = document.getElementById('settings-content');
-        
+        content.innerHTML = '<div class="loader-spinner"></div>';
+
+        this.activeTab = tabId;
+
+        // 根據 tabId 載入對應模組
         try {
-            switch (tabName) {
+            switch (tabId) {
                 case 'shifts':
-                    if (window.ShiftManagement) {
-                        await ShiftManagement.init(this.unitId);
+                    // 如果有實作 ShiftManagement，呼叫其 init
+                    if (typeof ShiftManagement !== 'undefined') {
+                        await ShiftManagement.init(content); 
                     } else {
-                        content.innerHTML = this.getPlaceholder('班別管理');
+                        content.innerHTML = '<p class="text-muted">班別管理功能載入中...</p>';
                     }
                     break;
-                    
-                case 'groups':
-                    if (window.GroupManagement) {
-                        await GroupManagement.init(this.unitId);
-                    } else {
-                        content.innerHTML = this.getPlaceholder('組別管理');
-                    }
-                    break;
-                    
                 case 'staff':
-                    if (window.StaffManagement) {
-                        await StaffManagement.init(this.unitId);
+                    if (typeof StaffManagement !== 'undefined') {
+                        await StaffManagement.init(content);
                     } else {
-                        content.innerHTML = this.getPlaceholder('人員管理');
+                        content.innerHTML = '<p class="text-muted">人員管理功能載入中...</p>';
                     }
                     break;
-                    
                 case 'rules':
-                    if (window.RuleManagement) {
-                        await RuleManagement.init(this.unitId);
+                    if (typeof RuleManagement !== 'undefined') {
+                        await RuleManagement.init(content);
                     } else {
-                        content.innerHTML = this.getPlaceholder('排班規則');
+                        content.innerHTML = '<p class="text-muted">規則管理功能載入中...</p>';
                     }
                     break;
-                    
-                case 'holidays':
-                    if (window.HolidayManagement) {
-                        await HolidayManagement.init(this.unitId);
-                    } else {
-                        content.innerHTML = this.getPlaceholder('假日設定');
-                    }
-                    break;
-                    
-                case 'notifications':
-                    content.innerHTML = this.getPlaceholder('通知設定', '設定各種通知的發送方式和時機');
-                    break;
-                    
-                case 'labor':
-                    content.innerHTML = this.getPlaceholder('勞基法規範', '設定變形工時類型和檢查規則');
-                    break;
-                    
                 default:
-                    content.innerHTML = this.getPlaceholder('未知分頁');
+                    content.innerHTML = `<p class="text-muted">模組 ${tabId} 開發中...</p>`;
             }
         } catch (error) {
-            console.error('[Settings] 載入分頁失敗:', error);
-            content.innerHTML = `
-                <div class="card-body">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">⚠️</div>
-                        <h3 class="empty-state-title">載入失敗</h3>
-                        <p class="empty-state-message">${error.message}</p>
-                        <button class="btn btn-primary" onclick="Settings.switchTab('${tabName}')">
-                            重試
-                        </button>
-                    </div>
-                </div>
-            `;
+            console.error(`載入分頁 ${tabId} 失敗:`, error);
+            content.innerHTML = `<div class="error-state">載入失敗: ${error.message}</div>`;
         }
-    },
-    
-    /**
-     * 取得佔位符內容
-     */
-    getPlaceholder(title, description = '') {
-        return `
-            <div class="card-body">
-                <div class="empty-state">
-                    <div class="empty-state-icon">⚙️</div>
-                    <h3 class="empty-state-title">${title}</h3>
-                    <p class="empty-state-message">
-                        ${description || '此功能尚在開發中'}
-                    </p>
-                </div>
-            </div>
-        `;
-    },
-    
-    // ==================== 工具方法 ====================
-    
-    /**
-     * 取得當前單位 ID
-     */
-    getUnitId() {
-        return this.unitId;
-    },
-    
-    /**
-     * 重新載入當前分頁
-     */
-    async refresh() {
-        await this.switchTab(this.currentTab);
-        Notification.success('已重新載入');
     }
 };
-
-// 讓設定管理可在全域使用
-if (typeof window !== 'undefined') {
-    window.Settings = Settings;
-}

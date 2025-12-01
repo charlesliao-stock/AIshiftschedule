@@ -1,15 +1,14 @@
 /**
- * 基本排班演算法
+ * js/modules/ai-engine/basic-algorithm.js
+ * 基本排班演算法 (ES Module 版)
  * Week 4 的簡易版本：讀取預班 + 隨機分配 + 基本人數檢查
  */
 
 import { ScheduleService } from '../../services/schedule.service.js';
 import { SettingsService } from '../../services/settings.service.js';
 
-class BasicAlgorithm {
+export class BasicAlgorithm {
     constructor() {
-        this.scheduleService = new ScheduleService();
-        this.settingsService = new SettingsService();
         this.currentMonth = null;
         this.staff = [];
         this.shifts = [];
@@ -26,13 +25,13 @@ class BasicAlgorithm {
             this.currentMonth = month;
             
             // 載入必要資料
-            this.staff = await this.settingsService.getStaff();
+            this.staff = await SettingsService.getStaff();
             this.staff = this.staff.filter(s => s.status === '在職');
             
-            this.shifts = await this.settingsService.getShifts();
-            this.groups = await this.settingsService.getGroups();
-            this.rules = await this.settingsService.getRules();
-            this.requirements = await this.settingsService.getRequirements();
+            this.shifts = await SettingsService.getShifts();
+            this.groups = await SettingsService.getGroups();
+            this.rules = await SettingsService.getRules();
+            this.requirements = await SettingsService.getRequirements();
 
         } catch (error) {
             console.error('初始化演算法失敗:', error);
@@ -88,7 +87,7 @@ class BasicAlgorithm {
      */
     initializeSchedule(partialSchedule) {
         const scheduleData = {};
-        const daysInMonth = this.scheduleService.getDaysInMonth(this.currentMonth);
+        const daysInMonth = ScheduleService.getDaysInMonth(this.currentMonth);
 
         this.staff.forEach(staff => {
             scheduleData[staff.staffId] = {};
@@ -127,11 +126,11 @@ class BasicAlgorithm {
      */
     calculateDailyNeeds(scheduleData) {
         const dailyNeeds = {};
-        const daysInMonth = this.scheduleService.getDaysInMonth(this.currentMonth);
+        const daysInMonth = ScheduleService.getDaysInMonth(this.currentMonth);
 
         for (let day = 1; day <= daysInMonth; day++) {
             const dateStr = this.currentMonth + day.toString().padStart(2, '0');
-            const dayOfWeek = this.scheduleService.getDayOfWeek(dateStr);
+            const dayOfWeek = ScheduleService.getDayOfWeek(dateStr);
             
             // 取得該日的班別需求
             const dayRequirements = this.requirements[dayOfWeek] || {};
@@ -165,7 +164,7 @@ class BasicAlgorithm {
      * 分配班別
      */
     assignShifts(scheduleData, dailyNeeds) {
-        const daysInMonth = this.scheduleService.getDaysInMonth(this.currentMonth);
+        const daysInMonth = ScheduleService.getDaysInMonth(this.currentMonth);
         const monthlyOffDays = this.rules?.基本規則?.本月應放天數 || 8;
 
         // 為每個員工分配班別
@@ -233,11 +232,11 @@ class BasicAlgorithm {
      */
     checkStaffing(scheduleData) {
         const issues = [];
-        const daysInMonth = this.scheduleService.getDaysInMonth(this.currentMonth);
+        const daysInMonth = ScheduleService.getDaysInMonth(this.currentMonth);
 
         for (let day = 1; day <= daysInMonth; day++) {
             const dateStr = this.currentMonth + day.toString().padStart(2, '0');
-            const dayOfWeek = this.scheduleService.getDayOfWeek(dateStr);
+            const dayOfWeek = ScheduleService.getDayOfWeek(dateStr);
             
             // 取得需求
             const dayRequirements = this.requirements[dayOfWeek] || {};
@@ -280,7 +279,7 @@ class BasicAlgorithm {
     calculateStatistics(scheduleData) {
         const stats = {
             totalStaff: this.staff.length,
-            totalDays: this.scheduleService.getDaysInMonth(this.currentMonth),
+            totalDays: ScheduleService.getDaysInMonth(this.currentMonth),
             scheduledCells: 0,
             emptyCells: 0,
             shiftCounts: {},
@@ -307,9 +306,6 @@ class BasicAlgorithm {
      * 格式化日期
      */
     formatDate(dateStr) {
-        return this.scheduleService.formatDate(dateStr);
+        return ScheduleService.formatDate(dateStr);
     }
 }
-
-// 匯出
-export { BasicAlgorithm };

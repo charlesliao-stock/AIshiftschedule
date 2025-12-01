@@ -1,113 +1,91 @@
 /**
- * Google Apps Script API 端點配置
- * 部署 Apps Script 後，請將 URL 更新到此處
+ * js/config/api.config.js
+ * Google Apps Script API 端點配置 (ES Module 版)
  */
 
-const API_CONFIG = {
-    // ==================== Apps Script Web App URL ====================
-    // 部署 Apps Script 為 Web App 後，會獲得一個 URL
-    // 格式: https://script.google.com/macros/s/{SCRIPT_ID}/exec
-
+export const API_CONFIG = {
+    // ==================== 核心配置 ====================
     
-    baseUrl: 'https://script.google.com/macros/s/AKfycbwFgjSHAwzPgJh0UMhKw_HGZG-09Q6BOZ55LdlvmrDv9VIPpVkzkaFZbLD67aUQvjE/exec',
-timeout: 30000,
-settings: 'https://script.google.com/macros/s/AKfycbwFgjSHAwzPgJh0UMhKw_HGZG-09Q6BOZ55LdlvmrDv9VIPpVkzkaFZbLD67aUQvjE/exec',
+    // 您的 Google Apps Script 部署網址 (Backend URL)
+    BASE_URL: 'https://script.google.com/macros/s/AKfycbwFgjSHAwzPgJh0UMhKw_HGZG-09Q6BOZ55LdlvmrDv9VIPpVkzkaFZbLD67aUQvjE/exec',
+    
+    // 預設請求超時 (毫秒)
+    TIMEOUT: 30000,
+    
+    // 開發測試用的 Sheet ID (當 Firebase 尚未建立單位資料時使用)
+    TEST_SHEET_ID: "1wq-GLwB4kwogmpXWk52tuAKT17ta710GKx5s4j6B3zk",
 
-    // ==================== API 端點 ====================
-    endpoints: {
-        // 設定檔 API
-        settings: {
-            getShifts: '/api/settings/shifts',
-            saveShifts: '/api/settings/shifts',
-            getGroups: '/api/settings/groups',
-            saveGroups: '/api/settings/groups',
-            getStaff: '/api/settings/staff',
-            saveStaff: '/api/settings/staff',
-            getRules: '/api/settings/rules',
-            saveRules: '/api/settings/rules',
-            getHolidays: '/api/settings/holidays',
-            saveHolidays: '/api/settings/holidays',
-            getNotifications: '/api/settings/notifications',
-            saveNotifications: '/api/settings/notifications',
-            getLaborStandards: '/api/settings/labor-standards',
-            saveLaborStandards: '/api/settings/labor-standards'
+    // ==================== API 動作定義 (Endpoints) ====================
+    // 這些字串會對應到 GAS 後端 doGet/doPost 中的 action 參數
+    
+    ENDPOINTS: {
+        // 系統測試
+        TEST_CONNECTION: 'testConnection',
+
+        // 單位管理 (Unit)
+        UNIT: {
+            LIST: 'getUnitList',
+            CREATE: 'createUnit',
+            UPDATE: 'updateUnit',
+            DELETE: 'deleteUnit',
+            INIT_SHEETS: 'initializeUnitSheets'
+        },
+
+        // 設定相關 (Settings)
+        SETTINGS: {
+            GET_SHIFTS: 'getShifts',
+            SAVE_SHIFTS: 'saveShifts',
+            GET_GROUPS: 'getGroups',
+            SAVE_GROUPS: 'saveGroups',
+            GET_STAFF: 'getStaff',
+            SAVE_STAFF: 'saveStaff',
+            GET_RULES: 'getRules',
+            SAVE_RULES: 'saveRules',
+            GET_HOLIDAYS: 'getHolidays',
+            SAVE_HOLIDAYS: 'saveHolidays',
+            GET_LABOR_STANDARDS: 'getLaborStandards',
+            SAVE_LABOR_STANDARDS: 'saveLaborStandards'
         },
         
-        // 預班表 API
-        preSchedule: {
-            get: '/api/pre-schedule/get',
-            save: '/api/pre-schedule/save',
-            getConfig: '/api/pre-schedule/config',
-            saveConfig: '/api/pre-schedule/config',
-            check: '/api/pre-schedule/check',
-            submit: '/api/pre-schedule/submit'
+        // 預班相關 (Pre-Schedule) - Week 5 重點
+        PRE_SCHEDULE: {
+            GET: 'getPreSchedule',
+            SAVE: 'savePreSchedule',
+            GET_CONFIG: 'getPreScheduleConfig',
+            SUBMIT: 'submitPreSchedule',
+            CHECK_CONFLICTS: 'checkPreScheduleConflicts'
         },
         
-        // 排班表 API
-        schedule: {
-            get: '/api/schedule/get',
-            save: '/api/schedule/save',
-            publish: '/api/schedule/publish',
-            getHistory: '/api/schedule/history',
-            saveHistory: '/api/schedule/history'
+        // 排班相關 (Schedule)
+        SCHEDULE: {
+            GET: 'getSchedule',
+            SAVE: 'saveSchedule',
+            PUBLISH: 'publishSchedule',
+            GET_HISTORY: 'getScheduleHistory'
         },
         
-        // 換班 API
-        swap: {
-            request: '/api/swap/request',
-            approve: '/api/swap/approve',
-            reject: '/api/swap/reject',
-            getHistory: '/api/swap/history'
-        },
-        
-        // 統計 API
-        statistics: {
-            personal: '/api/statistics/personal',
-            unit: '/api/statistics/unit',
-            export: '/api/statistics/export'
-        },
-        
-        // 單位管理 API
-        unit: {
-            create: '/api/unit/create',
-            update: '/api/unit/update',
-            delete: '/api/unit/delete',
-            list: '/api/unit/list'
-        },
-        
-        // 通知 API
-        notification: {
-            send: '/api/notification/send',
-            sendBatch: '/api/notification/send-batch'
-        },
-        
-        // 備份 API
-        backup: {
-            create: '/api/backup/create',
-            restore: '/api/backup/restore',
-            list: '/api/backup/list'
+        // 統計相關
+        STATISTICS: {
+            PERSONAL: 'getPersonalStats',
+            UNIT: 'getUnitStats'
         }
     },
     
-    // ==================== 請求配置 ====================
-    request: {
-        timeout: 30000,         // 30 秒
-        retryTimes: 3,          // 重試 3 次
-        retryDelay: 1000,       // 重試延遲 1 秒
-        headers: {
-            'Content-Type': 'application/json'
+    // ==================== 請求行為配置 ====================
+    REQUEST: {
+        TIMEOUT: 30000,
+        RETRY_TIMES: 3,
+        RETRY_DELAY: 1000,
+        HEADERS: {
+            'Content-Type': 'text/plain;charset=utf-8' // 避免 GAS CORS 預檢問題
         }
     },
     
     // ==================== Demo 模式 ====================
-    demo: {
-        enabled: true,  // 是否啟用 Demo 模式
-        // Demo 模式下，API 請求會被攔截並返回模擬資料
-        mockDelay: 500  // 模擬網路延遲 (毫秒)
+    DEMO: {
+        // ⚠️ 設定為 false 以連接真實的 Google Sheets
+        // 若設為 true，Service 層會攔截請求並回傳假資料
+        ENABLED: false, 
+        MOCK_DELAY: 500
     }
 };
-
-// 讓配置可在全域使用
-if (typeof window !== 'undefined') {
-    window.API_CONFIG = API_CONFIG;
-}

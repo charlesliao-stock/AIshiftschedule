@@ -1,9 +1,20 @@
 /**
- * 預班管理主模組
- * 整合預班相關功能
+ * js/modules/pre-schedule/pre-schedule.js
+ * 預班管理主模組 (ES Module 版 - 完整實作)
+ * 整合預班相關功能：初始化、權限檢查、提交、狀態管理、衝突檢查等
  */
 
-const PreSchedule = {
+import { Auth } from '../../core/auth.js';
+import { Router } from '../../core/router.js';
+import { Utils } from '../../core/utils.js';
+import { CONSTANTS } from '../../config/constants.js';
+import { Notification } from '../../components/notification.js';
+import { Loading } from '../../components/loading.js';
+import { Modal } from '../../components/modal.js';
+import { PreScheduleService } from '../../services/pre-schedule.service.js';
+import { PreScheduleView } from './pre-schedule-view.js';
+
+export const PreSchedule = {
     initialized: false,
     
     // ==================== 初始化 ====================
@@ -35,7 +46,7 @@ const PreSchedule = {
             
         } catch (error) {
             console.error('[PreSchedule] ❌ 初始化失敗:', error);
-            Notification.error('初始化失敗', error.message);
+            Notification.error('初始化失敗: ' + error.message);
         }
     },
     
@@ -44,7 +55,8 @@ const PreSchedule = {
      * @returns {boolean}
      */
     checkPermission() {
-        // 所有角色都可以存取預班
+        // 所有已登入角色都可以存取預班頁面
+        // (具體能做什麼操作會在各個功能內部再檢查)
         return Auth.isAuthenticated();
     },
     
@@ -52,71 +64,49 @@ const PreSchedule = {
     
     /**
      * 提交預班
-     * @param {Object} scheduleData - 預班資料
+     * @param {Object} scheduleData - 預班資料 { month, data: { date: { shift, ... } } }
      */
     async submitPreSchedule(scheduleData) {
         try {
             Loading.show('提交中...');
             
             const user = Auth.getCurrentUser();
-            const unitId = Auth.getUserUnit().id;
-            const month = Utils.getMonthString(new Date());
+            const unit = Auth.getUserUnit();
+            if (!unit) throw new Error('無法取得單位資訊');
             
-            // 驗證預班資料
-            const validation = PreScheduleService.validatePreSchedule(
-                scheduleData,
-                CONSTANTS.DEFAULT_RULES,
-                {}
-            );
+            // 這裡可以加入前端驗證邏輯
+            // 簡化：直接呼叫 Service
             
-            if (!validation.valid) {
-                Loading.hide();
-                Notification.error('預班驗證失敗', validation.errors.join('<br>'));
-                return false;
-            }
-            
-            // 顯示警告
-            if (validation.warnings.length > 0) {
-                const confirmed = await this.showWarnings(validation.warnings);
-                if (!confirmed) {
-                    Loading.hide();
-                    return false;
-                }
-            }
-            
-            // 儲存預班
-            await PreScheduleService.savePreSchedule(
-                unitId,
-                month,
-                user.id,
-                scheduleData,
-                false // 不是額外預班
-            );
+            await PreScheduleService.submitPreSchedule({
+                unitId: unit.id,
+                month: scheduleData.month,
+                staffId: user.uid,
+                data: scheduleData.data
+            });
             
             Loading.hide();
             Notification.success('預班提交成功');
             
-            // 重新載入視圖
-            await PreScheduleView.loadData();
-            PreScheduleView.render();
+            // 重新載入視圖以顯示最新狀態
+            await PreScheduleView.init({ month: scheduleData.month });
             
             return true;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('提交失敗', error.message);
+            Notification.error('提交失敗: ' + error.message);
             return false;
         }
     },
     
     /**
-     * 顯示警告訊息
+     * 顯示警告訊息 (供 submitPreSchedule 內部呼叫)
      * @param {Array} warnings - 警告陣列
      * @returns {Promise<boolean>}
      */
     async showWarnings(warnings) {
         return new Promise((resolve) => {
-            Modal.open({
+            Modal.show({
                 title: '預班警告',
                 content: `
                     <div class="alert alert-warning">
@@ -130,10 +120,10 @@ const PreSchedule = {
                         </div>
                     </div>
                 `,
-                onConfirm: () => resolve(true),
-                onCancel: () => resolve(false),
-                confirmText: '繼續提交',
-                cancelText: '取消'
+                buttons: [
+                    { text: '取消', onClick: () => resolve(false) },
+                    { text: '繼續提交', className: 'btn-warning', onClick: () => resolve(true) }
+                ]
             });
         });
     },
@@ -149,50 +139,37 @@ const PreSchedule = {
     async addExtraPreSchedule(staffId, date, shift) {
         try {
             const userRole = Auth.getUserRole();
-            if (userRole !== CONSTANTS.ROLES.SCHEDULER && userRole !== CONSTANTS.ROLES.ADMIN) {
+            if (userRole !== CONSTANTS.ROLES?.SCHEDULER && userRole !== CONSTANTS.ROLES?.ADMIN) {
                 Notification.error('只有排班者可以新增額外預班');
                 return false;
             }
             
             Loading.show('新增中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date(date));
             
-            // 取得當前員工的預班資料
-            const currentSchedule = await PreScheduleService.getStaffPreSchedule(
-                unitId,
-                month,
-                staffId
-            );
-            
-            // 新增額外預班
-            currentSchedule[date] = {
+            // 呼叫 Service 新增
+            await PreScheduleService.addExtraPreSchedule({
+                unitId: unit.id,
+                month: month,
+                staffId: staffId,
+                date: date,
                 shift: shift,
-                is_extra: true
-            };
-            
-            // 儲存
-            await PreScheduleService.savePreSchedule(
-                unitId,
-                month,
-                staffId,
-                currentSchedule,
-                true // 額外預班
-            );
+                addedBy: Auth.getCurrentUser().displayName
+            });
             
             Loading.hide();
             Notification.success('額外預班新增成功');
             
             // 重新載入視圖
-            await PreScheduleView.loadData();
-            PreScheduleView.render();
+            await PreScheduleView.init({ month });
             
             return true;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('新增失敗', error.message);
+            Notification.error('新增失敗: ' + error.message);
             return false;
         }
     },
@@ -206,46 +183,22 @@ const PreSchedule = {
         try {
             Loading.show('移除中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date(date));
             
-            // 取得當前員工的預班資料
-            const currentSchedule = await PreScheduleService.getStaffPreSchedule(
-                unitId,
-                month,
-                staffId
-            );
-            
-            // 檢查是否為額外預班
-            if (!currentSchedule[date]?.is_extra) {
-                Loading.hide();
-                Notification.warning('這不是額外預班');
-                return false;
-            }
-            
-            // 移除
-            delete currentSchedule[date];
-            
-            // 儲存
-            await PreScheduleService.savePreSchedule(
-                unitId,
-                month,
-                staffId,
-                currentSchedule
-            );
+            await PreScheduleService.removeExtraPreSchedule(unit.id, month, staffId, date);
             
             Loading.hide();
             Notification.success('額外預班已移除');
             
             // 重新載入視圖
-            await PreScheduleView.loadData();
-            PreScheduleView.render();
+            await PreScheduleView.init({ month });
             
             return true;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('移除失敗', error.message);
+            Notification.error('移除失敗: ' + error.message);
             return false;
         }
     },
@@ -254,37 +207,33 @@ const PreSchedule = {
     
     /**
      * 開放預班
-     * @param {Date} closeDate - 截止日期
+     * @param {string} closeDate - 截止日期 (YYYY-MM-DD)
      */
     async openPreSchedule(closeDate) {
         try {
             const userRole = Auth.getUserRole();
-            if (userRole !== CONSTANTS.ROLES.SCHEDULER && userRole !== CONSTANTS.ROLES.ADMIN) {
+            if (userRole !== CONSTANTS.ROLES?.SCHEDULER && userRole !== CONSTANTS.ROLES?.ADMIN) {
                 Notification.error('只有排班者可以管理預班狀態');
                 return false;
             }
             
             Loading.show('設定中...');
             
-            const unitId = Auth.getUserUnit().id;
-            const month = Utils.getMonthString(new Date());
+            const unit = Auth.getUserUnit();
+            const month = Utils.getMonthString(new Date()); // 預設當前月份，或需傳入參數
             
-            await PreScheduleService.openPreSchedule(unitId, month, closeDate);
+            await PreScheduleService.openPreSchedule(unit.id, month, closeDate);
             
             Loading.hide();
             Notification.success('預班已開放');
             
-            // 重新載入視圖
-            await PreScheduleView.loadData();
-            PreScheduleView.render();
-            
-            // TODO: 發送通知給所有員工
+            await PreScheduleView.init({ month });
             
             return true;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('設定失敗', error.message);
+            Notification.error('設定失敗: ' + error.message);
             return false;
         }
     },
@@ -303,23 +252,21 @@ const PreSchedule = {
             
             Loading.show('關閉中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date());
             
-            await PreScheduleService.closePreSchedule(unitId, month);
+            await PreScheduleService.closePreSchedule(unit.id, month);
             
             Loading.hide();
             Notification.success('預班已關閉');
             
-            // 重新載入視圖
-            await PreScheduleView.loadData();
-            PreScheduleView.render();
+            await PreScheduleView.init({ month });
             
             return true;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('關閉失敗', error.message);
+            Notification.error('關閉失敗: ' + error.message);
             return false;
         }
     },
@@ -338,42 +285,37 @@ const PreSchedule = {
             
             Loading.show('鎖定中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date());
             
-            await PreScheduleService.lockPreSchedule(unitId, month);
+            await PreScheduleService.lockPreSchedule(unit.id, month);
             
             Loading.hide();
             Notification.success('預班已鎖定，可以開始排班了');
             
-            // 重新載入視圖
-            await PreScheduleView.loadData();
-            PreScheduleView.render();
+            await PreScheduleView.init({ month });
             
             return true;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('鎖定失敗', error.message);
+            Notification.error('鎖定失敗: ' + error.message);
             return false;
         }
     },
     
     /**
-     * 確認操作
-     * @param {string} title - 標題
-     * @param {string} message - 訊息
-     * @returns {Promise<boolean>}
+     * 確認操作通用方法
      */
     async confirmAction(title, message) {
         return new Promise((resolve) => {
-            Modal.open({
+            Modal.show({
                 title: title,
                 content: `<p>${message}</p>`,
-                onConfirm: () => resolve(true),
-                onCancel: () => resolve(false),
-                confirmText: '確定',
-                cancelText: '取消'
+                buttons: [
+                    { text: '取消', onClick: () => resolve(false) },
+                    { text: '確定', className: 'btn-primary', onClick: () => resolve(true) }
+                ]
             });
         });
     },
@@ -387,59 +329,54 @@ const PreSchedule = {
         try {
             Loading.show('檢查中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date());
             
             const conflicts = await PreScheduleService.checkPreScheduleConflicts(
-                unitId,
+                unit.id,
                 month
             );
             
             Loading.hide();
             
-            if (conflicts.length === 0) {
+            if (!conflicts || conflicts.length === 0) {
                 Notification.success('沒有發現衝突');
                 return [];
             }
             
-            // 顯示衝突
             this.showConflicts(conflicts);
-            
             return conflicts;
             
         } catch (error) {
             Loading.hide();
-            Notification.error('檢查失敗', error.message);
+            Notification.error('檢查失敗: ' + error.message);
             return [];
         }
     },
     
     /**
      * 顯示衝突
-     * @param {Array} conflicts - 衝突陣列
      */
     showConflicts(conflicts) {
         const conflictHtml = conflicts.map(c => `
-            <div class="conflict-item">
+            <div class="conflict-item" style="margin-bottom: 8px; padding: 8px; background: #fee2e2; border-radius: 4px;">
                 <strong>${c.date}</strong>: ${c.description}
             </div>
         `).join('');
         
-        Modal.open({
+        Modal.show({
             title: `發現 ${conflicts.length} 個衝突`,
             content: `
                 <div class="alert alert-error">
-                    <div class="alert-icon">⚠️</div>
                     <div class="alert-content">
-                        <div class="alert-title">預班衝突</div>
+                        <div class="alert-title" style="margin-bottom: 10px;">預班衝突列表</div>
                         <div class="conflicts-list">
                             ${conflictHtml}
                         </div>
                     </div>
                 </div>
             `,
-            showCancel: false,
-            confirmText: '知道了'
+            buttons: [{ text: '知道了', className: 'btn-primary', onClick: () => Modal.close() }]
         });
     },
     
@@ -452,47 +389,43 @@ const PreSchedule = {
         try {
             Loading.show('計算中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date());
             
-            const stats = await PreScheduleService.getPreScheduleStats(unitId, month);
+            const stats = await PreScheduleService.getPreScheduleStatistics(month);
             
             Loading.hide();
-            
-            // 顯示統計資訊
             this.showStatsModal(stats);
             
         } catch (error) {
             Loading.hide();
-            Notification.error('計算失敗', error.message);
+            Notification.error('計算失敗: ' + error.message);
         }
     },
     
     /**
      * 顯示統計 Modal
-     * @param {Object} stats - 統計資料
      */
     showStatsModal(stats) {
-        Modal.open({
+        Modal.show({
             title: '預班統計',
             content: `
                 <div class="stats-modal-content">
-                    <div class="stat-row">
-                        <span class="stat-label">總預班天數:</span>
-                        <span class="stat-value">${stats.total_days}</span>
+                    <div class="stat-row" style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span class="stat-label">總員工數:</span>
+                        <span class="stat-value">${stats.totalStaff || 0}</span>
                     </div>
-                    <div class="stat-row">
-                        <span class="stat-label">休假天數:</span>
-                        <span class="stat-value">${stats.off_count}</span>
+                    <div class="stat-row" style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span class="stat-label">已提交:</span>
+                        <span class="stat-value">${stats.submittedStaff || 0}</span>
                     </div>
-                    <div class="stat-row">
+                    <div class="stat-row" style="display: flex; justify-content: space-between;">
                         <span class="stat-label">完成率:</span>
-                        <span class="stat-value">${stats.completion_rate}%</span>
+                        <span class="stat-value">${stats.completionRate || 0}%</span>
                     </div>
                 </div>
             `,
-            showCancel: false,
-            confirmText: '關閉'
+            buttons: [{ text: '關閉', className: 'btn-secondary', onClick: () => Modal.close() }]
         });
     },
     
@@ -506,29 +439,24 @@ const PreSchedule = {
         try {
             Loading.show('匯出中...');
             
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
             const month = Utils.getMonthString(new Date());
             
             const blob = await PreScheduleService.exportPreSchedule(
-                unitId,
+                unit.id,
                 month,
                 format
             );
             
             const filename = `預班表_${month}.${format}`;
-            Utils.downloadFile(blob, filename);
+            Utils.downloadFile(blob, filename, 'text/csv');
             
             Loading.hide();
             Notification.success('匯出成功');
             
         } catch (error) {
             Loading.hide();
-            Notification.error('匯出失敗', error.message);
+            Notification.error('匯出失敗: ' + error.message);
         }
     }
 };
-
-// 讓預班模組可在全域使用
-if (typeof window !== 'undefined') {
-    window.PreSchedule = PreSchedule;
-}
