@@ -7,9 +7,12 @@ const API_CONFIG = {
     // ==================== Apps Script Web App URL ====================
     // 部署 Apps Script 為 Web App 後，會獲得一個 URL
     // 格式: https://script.google.com/macros/s/{SCRIPT_ID}/exec
+
     
-    baseUrl: 'YOUR_APPS_SCRIPT_WEB_APP_URL',
-    
+    baseUrl: 'https://script.google.com/macros/s/AKfycbwFgjSHAwzPgJh0UMhKw_HGZG-09Q6BOZ55LdlvmrDv9VIPpVkzkaFZbLD67aUQvjE/exec',
+timeout: 30000,
+settings: 'https://script.google.com/macros/s/AKfycbwFgjSHAwzPgJh0UMhKw_HGZG-09Q6BOZ55LdlvmrDv9VIPpVkzkaFZbLD67aUQvjE/exec',
+
     // ==================== API 端點 ====================
     endpoints: {
         // 設定檔 API
