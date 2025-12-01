@@ -1,0 +1,1 @@
+這是一份護理排班系統的規劃，部分檔案已經上傳到GitHub，有RAW檔案的網址附在development_progress_report.md的檔案中，請依此推斷Week 1-4各檔的RAW檔案網址。目前撰寫的進度完成到Week 4。請繼續完成Week 5的各個檔案。

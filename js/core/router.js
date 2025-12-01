@@ -458,15 +458,41 @@ const Router = {
     /**
      * 載入預班管理
      */
-    async loadPreSchedule() {
-        console.log('[Router] 載入預班管理');
-        const mainContent = document.getElementById('main-content');
-        mainContent.innerHTML = `
-            <h1>預班管理</h1>
-            <p class="text-muted">功能開發中 (Week 5)</p>
-        `;
-    },
+async loadPreSchedule() {
+    console.log('[Router] 載入預班管理');
     
+    const mainContent = document.getElementById('main-content');
+    
+    // 建立預班容器
+    mainContent.innerHTML = `
+        <div id="pre-schedule-container">
+            <!-- PreScheduleView 會動態生成內容 -->
+        </div>
+    `;
+    
+    // 初始化預班模組
+    try {
+        // 確保 PreSchedule 模組已載入
+        if (typeof PreSchedule === 'undefined') {
+            throw new Error('預班模組尚未載入');
+        }
+        
+        await PreSchedule.init();
+        
+    } catch (error) {
+        console.error('[Router] 載入預班模組失敗:', error);
+        mainContent.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">⚠️</div>
+                <div class="empty-state-title">載入失敗</div>
+                <div class="empty-state-message">${error.message}</div>
+                <button class="btn btn-primary" onclick="Router.navigate('/pre-schedule')">
+                    重新載入
+                </button>
+            </div>
+        `;
+    }
+}
     /**
      * 載入排班管理
      */
