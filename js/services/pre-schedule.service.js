@@ -4,39 +4,32 @@
  */
 
 import { FIREBASE_CONFIG } from '../config/firebase.config.js';
-import { Auth } from '../core/auth.js'; // ✅ 修正：引用整個 Auth 物件
+import { Auth } from '../core/auth.js'; 
 
 export const PreScheduleService = {
     
     /**
      * 取得指定年份與月份的預班資料
-     * @param {number} year 
-     * @param {number} month 
-     * @returns {Promise<Array>}
      */
-    async getPreSchedule(year, month) { // ✅ 修正：名稱改為單數 (去掉 s)
+    async getPreSchedule(year, month) {
         console.log(`[PreScheduleService] 載入預班資料: ${year}-${month}`);
         
         try {
             if (!window.firebase) throw new Error("Firebase 未初始化");
 
-            // ✅ 修正：使用正確的方法取得單位資訊
             const unit = Auth.getUserUnit();
             const unitId = unit ? unit.id : null;
 
-            // 建立查詢
             let query = window.firebase.firestore()
-                .collection('pre_schedules') // 若您的集合名稱不同，請在此修改
+                .collection('pre_schedules')
                 .where('year', '==', parseInt(year))
                 .where('month', '==', parseInt(month));
 
-            // 如果有單位 ID，則只撈取該單位的資料 (可選)
             if (unitId) {
                 query = query.where('unit_id', '==', unitId);
             }
 
             const snapshot = await query.get();
-
             const schedules = [];
             snapshot.forEach(doc => {
                 schedules.push({
@@ -50,23 +43,56 @@ export const PreScheduleService = {
 
         } catch (error) {
             console.error('[PreScheduleService] 載入失敗:', error);
-            // 為了不讓畫面卡死，發生錯誤時回傳空陣列，但會在 Console 留紀錄
             return []; 
         }
     },
 
     /**
+     * [新增] 取得預班設定 (規則、班別定義等)
+     * 修復: PreScheduleService.getPreScheduleConfig is not a function
+     */
+    async getPreScheduleConfig() {
+        console.log('[PreScheduleService] 載入預班設定...');
+        try {
+            // 嘗試從資料庫讀取設定 (假設存放在 settings/pre_schedule)
+            const doc = await window.firebase.firestore()
+                .collection('settings')
+                .doc('pre_schedule')
+                .get();
+
+            if (doc.exists) {
+                return doc.data();
+            } 
+            
+            // 如果資料庫沒設定，回傳「預設值」讓畫面能正常顯示
+            // 這樣就不會報錯了
+            console.warn('[PreScheduleService] 找不到設定，使用預設值');
+            return {
+                isOpen: true,           // 是否開放預班
+                deadlineDay: 25,        // 每月截止日
+                maxRequests: 5,         // 每人最多預選數
+                shifts: [               // 可選班別定義
+                    { id: 'D', name: '白班', color: '#ffedc4' },
+                    { id: 'E', name: '小夜', color: '#ffd1d1' },
+                    { id: 'N', name: '大夜', color: '#d1e7ff' },
+                    { id: 'OFF', name: '預休', color: '#e0e0e0' }
+                ]
+            };
+
+        } catch (error) {
+            console.error('[PreScheduleService] 取得設定失敗:', error);
+            // 發生錯誤時回傳空物件，避免崩潰
+            return { isOpen: true, shifts: [] };
+        }
+    },
+
+    /**
      * 儲存或更新預班申請
-     * @param {Object} data 
-     * @returns {Promise<string>} docId
      */
     async savePreSchedule(data) {
         console.log('[PreScheduleService] 儲存預班申請:', data);
-        
         try {
             const collectionRef = window.firebase.firestore().collection('pre_schedules');
-            
-            // 確保資料包含單位資訊
             const unit = Auth.getUserUnit();
             const payload = {
                 ...data,
@@ -74,7 +100,6 @@ export const PreScheduleService = {
                 unit_name: data.unit_name || (unit ? unit.name : '預設單位')
             };
 
-            // 如果有 ID 則更新，否則新增
             if (payload.id) {
                 await collectionRef.doc(payload.id).update({
                     ...payload,
@@ -82,7 +107,6 @@ export const PreScheduleService = {
                 });
                 return payload.id;
             } else {
-                // 新增時加入建立時間
                 const docRef = await collectionRef.add({
                     ...payload,
                     createdAt: window.firebase.firestore.FieldValue.serverTimestamp(),
@@ -98,7 +122,6 @@ export const PreScheduleService = {
 
     /**
      * 刪除預班申請
-     * @param {string} id 
      */
     async deletePreSchedule(id) {
         try {
