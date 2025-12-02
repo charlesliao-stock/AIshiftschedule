@@ -1,11 +1,10 @@
 /**
  * js/modules/unit-management/unit-management.js
- * 修正版: 配合 UnitService 的欄位名稱
+ * 單位管理主模組 (完整修復版)
  */
 
 import { UnitService } from '../../services/unit.service.js';
 import { Auth } from '../../core/auth.js';
-import { Router } from '../../core/router.js';
 import { Notification } from '../../components/notification.js';
 import { Loading } from '../../components/loading.js';
 import { Modal } from '../../components/modal.js';
@@ -19,9 +18,10 @@ export const UnitManagement = {
     async init() {
         console.log('[UnitManagement] 初始化...');
         
+        // 使用 window.router 進行導航，避免循環依賴
         if (!Auth.isAdmin()) {
             Notification.error('您沒有權限存取此頁面');
-            window.router.navigate('/dashboard'); // 改用 window.router 避免 import 循環
+            if (window.router) window.router.navigate('/dashboard');
             return;
         }
 
@@ -42,7 +42,9 @@ export const UnitManagement = {
             <div class="card">
                 <div class="card-body">
                     <div id="unit-list-container">
-                        <div class="loader-spinner"></div>
+                        <div class="text-center p-4">
+                            <i class="fas fa-spinner fa-spin"></i> 載入中...
+                        </div>
                     </div>
                 </div>
             </div>
@@ -51,15 +53,12 @@ export const UnitManagement = {
 
     async loadUnits() {
         try {
-            Loading.show('載入單位列表...');
             this.units = await UnitService.getAllUnits();
             this.renderList();
-            Loading.hide();
         } catch (error) {
-            Loading.hide();
             Notification.error('載入失敗: ' + error.message);
             const container = document.getElementById('unit-list-container');
-            if(container) container.innerHTML = `<div class="error-state">${error.message}</div>`;
+            if (container) container.innerHTML = `<div class="error-state">${error.message}</div>`;
         }
     },
 
@@ -68,7 +67,7 @@ export const UnitManagement = {
         if (!container) return;
 
         if (this.units.length === 0) {
-            container.innerHTML = '<div class="empty-state">目前沒有單位資料</div>';
+            container.innerHTML = '<div class="empty-state">目前沒有單位資料，請點擊上方按鈕新增。</div>';
             return;
         }
 
@@ -79,6 +78,7 @@ export const UnitManagement = {
                         <th>代碼</th>
                         <th>名稱</th>
                         <th>建立時間</th>
+                        <th>狀態</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -86,15 +86,18 @@ export const UnitManagement = {
         `;
 
         this.units.forEach(unit => {
-            // ✅ 修正: 欄位名稱對應 (unit_code -> code, unit_name -> name)
-            // ✅ 修正: unit_id -> id (Firestore 預設 ID 欄位)
+            // 統一使用 name 和 code
             const createdDate = unit.created_at ? new Date(unit.created_at.seconds * 1000).toLocaleDateString() : '-';
-            
+            const statusBadge = unit.status === 'inactive' 
+                ? '<span class="badge bg-secondary">停用</span>' 
+                : '<span class="badge bg-success">啟用中</span>';
+
             html += `
                 <tr>
-                    <td>${unit.code || unit.unit_code || ''}</td>
-                    <td>${unit.name || unit.unit_name || ''}</td>
+                    <td>${unit.code || ''}</td>
+                    <td>${unit.name || ''}</td>
                     <td>${createdDate}</td>
+                    <td>${statusBadge}</td>
                     <td>
                         <button class="btn btn-sm btn-info edit-btn" data-id="${unit.id}">編輯</button>
                         <button class="btn btn-sm btn-danger delete-btn" data-id="${unit.id}">刪除</button>
@@ -135,8 +138,9 @@ export const UnitManagement = {
             await this.loadUnits(); 
             Notification.success('單位已刪除');
         } catch (error) {
-            Loading.hide();
             Notification.error('刪除失敗: ' + error.message);
+        } finally {
+            Loading.hide();
         }
     }
 };
