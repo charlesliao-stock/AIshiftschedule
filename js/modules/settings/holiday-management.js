@@ -1,302 +1,258 @@
 /**
- * 假日管理模組
+ * js/modules/settings/holiday-management.js
+ * 假日管理模組 (ES Module + Firebase 版)
  */
 
-const HolidayManagement = {
-    unitId: null,
-    holidays: [],
+import { SettingsService } from '../../services/settings.service.js';
+import { Notification } from '../../components/notification.js';
+import { Loading } from '../../components/loading.js';
+import { Modal } from '../../components/modal.js';
+import { Utils } from '../../core/utils.js';
+
+export const HolidayManagement = {
+    container: null,
+    allHolidays: [], // 存放所有年份的假日
     currentYear: new Date().getFullYear(),
-    
-    async init(unitId) {
-        console.log('[HolidayManagement] 初始化假日管理');
-        this.unitId = unitId;
+
+    async init(container) {
+        this.container = container;
         this.render();
         await this.loadHolidays();
     },
-    
+
     render() {
-        const content = document.getElementById('settings-content');
-        
-        content.innerHTML = `
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <h3 class="card-title">假日設定</h3>
-                    <p style="margin: 8px 0 0 0; color: #666; font-size: 14px;">設定國定假日、週末及其他特殊假日</p>
-                </div>
-                <div style="display: flex; gap: 12px;">
-                    <select id="year-select" class="form-select" style="width: 120px;">
+        this.container.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="mb-0">假日設定</h5>
+                    <select id="year-select" class="form-select form-select-sm" style="width: auto;">
                         <option value="${this.currentYear - 1}">${this.currentYear - 1}</option>
                         <option value="${this.currentYear}" selected>${this.currentYear}</option>
                         <option value="${this.currentYear + 1}">${this.currentYear + 1}</option>
                     </select>
-                    <button class="btn btn-secondary" id="import-holidays-btn">📥 匯入國定假日</button>
-                    <button class="btn btn-primary" id="add-holiday-btn">➕ 新增假日</button>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline-secondary btn-sm" id="import-holidays-btn">📥 匯入國定假日</button>
+                    <button class="btn btn-primary btn-sm" id="add-holiday-btn">➕ 新增假日</button>
                 </div>
             </div>
-            <div class="card-body" style="padding: 0;">
-                <div id="holidays-table-container">
-                    <div style="padding: 60px; text-align: center; color: #999;">
-                        <div class="loader-spinner" style="margin: 0 auto 16px;"></div>
-                        <p>載入中...</p>
-                    </div>
-                </div>
-            </div>
-            <div class="card-footer">
-                <button class="btn btn-primary" id="save-holidays-btn">💾 儲存變更</button>
+            <div id="holidays-table-container">
+                <div class="text-center py-4 text-muted">載入中...</div>
             </div>
         `;
-        
         this.bindEvents();
     },
-    
-    renderHolidaysTable() {
+
+    async loadHolidays() {
+        try {
+            Loading.show('載入假日...');
+            // 載入"所有"假日，後端不分年
+            this.allHolidays = await SettingsService.getHolidays(); 
+            this.renderTable();
+        } catch (error) {
+            Notification.error('載入失敗');
+        } finally {
+            Loading.hide();
+        }
+    },
+
+    renderTable() {
         const container = document.getElementById('holidays-table-container');
         
-        const filteredHolidays = this.holidays.filter(h => 
+        // 根據選擇的年份篩選
+        const filteredHolidays = this.allHolidays.filter(h => 
             h.applicableYear === 'all' || parseInt(h.applicableYear) === this.currentYear
         );
-        
-        if (filteredHolidays.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-state-icon">📅</div>
-                    <h3 class="empty-state-title">${this.currentYear} 年尚無假日設定</h3>
-                    <p class="empty-state-message">點擊「匯入國定假日」快速建立，或手動「新增假日」</p>
-                </div>
-            `;
-            return;
-        }
-        
-        // 依日期排序
-        const sortedHolidays = [...filteredHolidays].sort((a, b) => {
+
+        // 排序：先排固定週期，再排日期
+        filteredHolidays.sort((a, b) => {
             if (a.type === 'recurring' && b.type !== 'recurring') return 1;
             if (a.type !== 'recurring' && b.type === 'recurring') return -1;
-            return a.date.localeCompare(b.date);
+            return (a.date || '').localeCompare(b.date || '');
         });
-        
-        let tableHtml = `
-            <table class="table">
+
+        if (filteredHolidays.length === 0) {
+            container.innerHTML = `
+                <div class="alert alert-info text-center">
+                    ${this.currentYear} 年尚無假日設定。<br>
+                    您可以點擊「匯入國定假日」快速建立。
+                </div>`;
+            return;
+        }
+
+        let html = `
+            <table class="table table-hover align-middle">
                 <thead>
                     <tr>
                         <th>日期</th>
-                        <th>假日名稱</th>
+                        <th>名稱</th>
                         <th>類型</th>
                         <th>適用年度</th>
-                        <th style="text-align: center;">啟用</th>
-                        <th style="text-align: center;">操作</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody>
         `;
-        
-        sortedHolidays.forEach(holiday => {
-            const typeName = holiday.type === 'national' ? '國定假日' : holiday.type === 'recurring' ? '固定週期' : '其他';
-            const enabledIcon = holiday.enabled ? '✓' : '✕';
-            const dateText = holiday.type === 'recurring' ? holiday.date : Utils.formatDate(holiday.date, 'YYYY/MM/DD');
+
+        filteredHolidays.forEach((holiday, index) => {
+            const typeMap = { 'national': '國定假日', 'recurring': '固定週期', 'other': '其他' };
+            const typeName = typeMap[holiday.type] || '其他';
             
-            tableHtml += `
+            html += `
                 <tr>
-                    <td>${dateText}</td>
-                    <td><strong>${holiday.name}</strong></td>
-                    <td>${typeName}</td>
-                    <td>${holiday.applicableYear === 'all' ? '所有' : holiday.applicableYear}</td>
-                    <td style="text-align: center;">
-                        <span style="font-size: 18px; color: ${holiday.enabled ? '#10b981' : '#999'};">${enabledIcon}</span>
-                    </td>
-                    <td style="text-align: center;">
-                        <button class="btn btn-sm btn-secondary" onclick="HolidayManagement.editHoliday('${holiday.id}')">✏️</button>
-                        <button class="btn btn-sm btn-error" onclick="HolidayManagement.deleteHoliday('${holiday.id}')">🗑️</button>
+                    <td>${holiday.date}</td>
+                    <td>${holiday.name}</td>
+                    <td><span class="badge bg-light text-dark border">${typeName}</span></td>
+                    <td>${holiday.applicableYear === 'all' ? '每年' : holiday.applicableYear}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-danger delete-holiday-btn" data-id="${holiday.id}">刪除</button>
                     </td>
                 </tr>
             `;
         });
-        
-        tableHtml += `</tbody></table>`;
-        container.innerHTML = tableHtml;
+
+        html += `</tbody></table>`;
+        container.innerHTML = html;
+
+        container.querySelectorAll('.delete-holiday-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.deleteHoliday(e.target.dataset.id));
+        });
     },
-    
+
     bindEvents() {
-        document.getElementById('add-holiday-btn')?.addEventListener('click', () => this.showAddHolidayModal());
-        document.getElementById('import-holidays-btn')?.addEventListener('click', () => this.importNationalHolidays());
-        document.getElementById('save-holidays-btn')?.addEventListener('click', () => this.saveHolidays());
-        
         const yearSelect = document.getElementById('year-select');
-        if (yearSelect) {
-            yearSelect.addEventListener('change', (e) => {
-                this.currentYear = parseInt(e.target.value);
-                this.renderHolidaysTable();
-            });
-        }
+        yearSelect?.addEventListener('change', (e) => {
+            this.currentYear = parseInt(e.target.value);
+            this.renderTable();
+        });
+
+        document.getElementById('add-holiday-btn')?.addEventListener('click', () => this.addHoliday());
+        document.getElementById('import-holidays-btn')?.addEventListener('click', () => this.importNationalHolidays());
     },
-    
-    async loadHolidays() {
-        try {
-            Loading.show('載入假日設定...');
-            const result = await SheetsService.post(API_CONFIG.endpoints.settings.getHolidays, { unit_id: this.unitId });
-            this.holidays = result.success && result.data ? result.data : this.getDefaultHolidays();
-            this.renderHolidaysTable();
-            Loading.hide();
-        } catch (error) {
-            Loading.hide();
-            Notification.error('載入假日設定失敗: ' + error.message);
-            this.holidays = this.getDefaultHolidays();
-            this.renderHolidaysTable();
-        }
-    },
-    
-    async saveHolidays() {
-        try {
-            Loading.show('儲存假日設定...');
-            const result = await SheetsService.post(API_CONFIG.endpoints.settings.saveHolidays, {
-                unit_id: this.unitId,
-                holidays: this.holidays
-            });
-            
-            if (!result.success) throw new Error(result.message || '儲存失敗');
-            
-            Loading.hide();
-            Notification.success('假日設定已儲存');
-            SheetsService.clearCache('/settings/holidays');
-        } catch (error) {
-            Loading.hide();
-            Notification.error('儲存假日設定失敗: ' + error.message);
-        }
-    },
-    
-    async showAddHolidayModal() {
+
+    async addHoliday() {
         const result = await Modal.form('新增假日', [
             { name: 'date', label: '日期', type: 'date', required: true },
-            { name: 'name', label: '假日名稱', type: 'text', placeholder: '例如: 元旦', required: true },
+            { name: 'name', label: '名稱', placeholder: '例如: 員工旅遊', required: true },
             { name: 'type', label: '類型', type: 'select', options: [
+                { value: 'other', label: '其他' },
                 { value: 'national', label: '國定假日' },
-                { value: 'recurring', label: '固定週期 (如週末)' },
-                { value: 'other', label: '其他' }
-            ], value: 'national', required: true },
-            { name: 'applicableYear', label: '適用年度', type: 'select', options: [
-                { value: 'all', label: '所有年度' },
-                { value: this.currentYear, label: this.currentYear }
-            ], value: this.currentYear, required: true },
-            { name: 'enabled', label: '啟用', type: 'select', options: [
-                { value: 'true', label: '是' },
-                { value: 'false', label: '否' }
-            ], value: 'true', required: true }
+                { value: 'recurring', label: '固定週期 (每年)' }
+            ], required: true }
         ]);
-        
+
         if (result) {
-            const newHoliday = {
-                id: Utils.generateId(),
-                date: result.date,
-                name: result.name,
-                type: result.type,
-                applicableYear: result.applicableYear,
-                enabled: result.enabled === 'true'
-            };
-            
-            this.holidays.push(newHoliday);
-            this.renderHolidaysTable();
-            Notification.success('假日已新增，請記得儲存變更');
+            try {
+                Loading.show('儲存中...');
+                const newHoliday = {
+                    id: 'h_' + Date.now(),
+                    date: result.date,
+                    name: result.name,
+                    type: result.type,
+                    // 如果是 recurring 則設為 all，否則設為當前年份
+                    applicableYear: result.type === 'recurring' ? 'all' : this.currentYear.toString()
+                };
+
+                this.allHolidays.push(newHoliday);
+                await SettingsService.saveHolidays(this.allHolidays); // 儲存整個陣列
+                this.renderTable();
+                Notification.success('新增成功');
+            } catch (error) {
+                Notification.error('儲存失敗: ' + error.message);
+            } finally {
+                Loading.hide();
+            }
         }
     },
-    
-    async editHoliday(holidayId) {
-        const holiday = this.holidays.find(h => h.id === holidayId);
-        if (!holiday) return;
-        
-        const result = await Modal.form('編輯假日', [
-            { name: 'date', label: '日期', type: 'date', value: holiday.date, required: true },
-            { name: 'name', label: '假日名稱', type: 'text', value: holiday.name, required: true },
-            { name: 'type', label: '類型', type: 'select', options: [
-                { value: 'national', label: '國定假日' },
-                { value: 'recurring', label: '固定週期' },
-                { value: 'other', label: '其他' }
-            ], value: holiday.type, required: true },
-            { name: 'applicableYear', label: '適用年度', type: 'text', value: holiday.applicableYear, required: true },
-            { name: 'enabled', label: '啟用', type: 'select', options: [
-                { value: 'true', label: '是' },
-                { value: 'false', label: '否' }
-            ], value: holiday.enabled ? 'true' : 'false', required: true }
-        ]);
-        
-        if (result) {
-            holiday.date = result.date;
-            holiday.name = result.name;
-            holiday.type = result.type;
-            holiday.applicableYear = result.applicableYear;
-            holiday.enabled = result.enabled === 'true';
-            
-            this.renderHolidaysTable();
-            Notification.success('假日已更新，請記得儲存變更');
+
+    async deleteHoliday(id) {
+        if (await Modal.confirm('確定刪除此假日？')) {
+            try {
+                Loading.show('刪除中...');
+                this.allHolidays = this.allHolidays.filter(h => h.id !== id);
+                await SettingsService.saveHolidays(this.allHolidays);
+                this.renderTable();
+                Notification.success('刪除成功');
+            } catch (error) {
+                Notification.error('刪除失敗');
+            } finally {
+                Loading.hide();
+            }
         }
     },
-    
-    async deleteHoliday(holidayId) {
-        const holiday = this.holidays.find(h => h.id === holidayId);
-        if (!holiday) return;
-        
-        const confirmed = await Modal.confirm(`確定要刪除假日「${holiday.name}」嗎？`);
-        if (confirmed) {
-            this.holidays = this.holidays.filter(h => h.id !== holidayId);
-            this.renderHolidaysTable();
-            Notification.success('假日已刪除，請記得儲存變更');
-        }
-    },
-    
+
     async importNationalHolidays() {
-        const confirmed = await Modal.confirm(
-            `確定要匯入 ${this.currentYear} 年的國定假日嗎？\n\n這會新增台灣的國定假日到假日清單中。`,
-            { confirmText: '匯入' }
-        );
-        
-        if (confirmed) {
-            const nationalHolidays = this.getNationalHolidays(this.currentYear);
+        if (!await Modal.confirm(`確定要匯入 ${this.currentYear} 年的台灣國定假日嗎？`)) return;
+
+        try {
+            Loading.show('匯入中...');
             
-            // 檢查重複
-            nationalHolidays.forEach(holiday => {
-                const exists = this.holidays.some(h => h.date === holiday.date && h.name === holiday.name);
+            // 簡單的國定假日產生器 (範例)
+            const holidays = this.generateTaiwanHolidays(this.currentYear);
+            
+            let addedCount = 0;
+            holidays.forEach(h => {
+                // 檢查是否已存在 (同日期且同名)
+                const exists = this.allHolidays.some(exist => 
+                    exist.date === h.date && exist.name === h.name
+                );
+                
                 if (!exists) {
-                    this.holidays.push(holiday);
+                    this.allHolidays.push({
+                        id: 'h_auto_' + Date.now() + Math.random().toString(36).substr(2, 5),
+                        ...h,
+                        type: 'national',
+                        applicableYear: this.currentYear.toString()
+                    });
+                    addedCount++;
                 }
             });
-            
-            this.renderHolidaysTable();
-            Notification.success(`已匯入 ${nationalHolidays.length} 個國定假日，請記得儲存變更`);
+
+            if (addedCount > 0) {
+                await SettingsService.saveHolidays(this.allHolidays);
+                this.renderTable();
+                Notification.success(`成功匯入 ${addedCount} 個假日`);
+            } else {
+                Notification.info('沒有需要新增的假日');
+            }
+        } catch (error) {
+            Notification.error('匯入失敗: ' + error.message);
+        } finally {
+            Loading.hide();
         }
     },
-    
-    getDefaultHolidays() {
-        return [
-            { id: Utils.generateId(), date: '每週六', name: '週末', type: 'recurring', applicableYear: 'all', enabled: true },
-            { id: Utils.generateId(), date: '每週日', name: '週末', type: 'recurring', applicableYear: 'all', enabled: true }
+
+    // 內建台灣國定假日資料
+    generateTaiwanHolidays(year) {
+        // 這裡可以根據年份返回對應的假日
+        // 簡單範例，實際專案可能需要更完整的清單或 API
+        const commonHolidays = [
+            { date: `${year}-01-01`, name: '元旦' },
+            { date: `${year}-02-28`, name: '和平紀念日' },
+            { date: `${year}-04-04`, name: '兒童節' },
+            { date: `${year}-04-05`, name: '清明節' },
+            { date: `${year}-05-01`, name: '勞動節' },
+            { date: `${year}-10-10`, name: '國慶日' }
         ];
-    },
-    
-    getNationalHolidays(year) {
-        // 2025 年台灣國定假日
-        const holidays2025 = [
-            { date: '2025-01-01', name: '元旦' },
-            { date: '2025-01-28', name: '春節' },
-            { date: '2025-01-29', name: '春節' },
-            { date: '2025-01-30', name: '春節' },
-            { date: '2025-01-31', name: '春節' },
-            { date: '2025-02-28', name: '和平紀念日' },
-            { date: '2025-04-04', name: '清明節' },
-            { date: '2025-05-01', name: '勞動節' },
-            { date: '2025-05-31', name: '端午節' },
-            { date: '2025-10-07', name: '中秋節' },
-            { date: '2025-10-10', name: '國慶日' }
-        ];
-        
-        return holidays2025.map(h => ({
-            id: Utils.generateId(),
-            date: h.date,
-            name: h.name,
-            type: 'national',
-            applicableYear: year.toString(),
-            enabled: true
-        }));
+
+        // 農曆假日需要演算法計算，這裡暫時寫死 2025 的範例
+        if (year === 2025) {
+            return [
+                ...commonHolidays,
+                { date: '2025-01-25', name: '春節連假' },
+                { date: '2025-01-26', name: '春節連假' },
+                { date: '2025-01-27', name: '春節連假' },
+                { date: '2025-01-28', name: '除夕' },
+                { date: '2025-01-29', name: '春節' },
+                { date: '2025-01-30', name: '春節' },
+                { date: '2025-01-31', name: '春節' },
+                { date: '2025-02-01', name: '春節連假' },
+                { date: '2025-02-02', name: '春節連假' },
+                { date: '2025-05-31', name: '端午節' },
+                { date: '2025-10-06', name: '中秋節' }
+            ];
+        }
+
+        return commonHolidays;
     }
 };
-
-if (typeof window !== 'undefined') {
-    window.HolidayManagement = HolidayManagement;
-}
