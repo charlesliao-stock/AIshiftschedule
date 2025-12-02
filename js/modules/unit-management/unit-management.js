@@ -1,6 +1,6 @@
 /**
  * js/modules/unit-management/unit-management.js
- * 單位管理主模組 (完整修復版)
+ * 單位管理主模組 (完整修復版 - 包含人員分配功能)
  */
 
 import { UnitService } from '../../services/unit.service.js';
@@ -10,6 +10,7 @@ import { Loading } from '../../components/loading.js';
 import { Modal } from '../../components/modal.js';
 import { UnitCreate } from './unit-create.js';
 import { UnitEdit } from './unit-edit.js';
+import { UserAssignment } from './user-assignment.js'; // ✅ 新增引用
 
 export const UnitManagement = {
     container: null,
@@ -86,7 +87,6 @@ export const UnitManagement = {
         `;
 
         this.units.forEach(unit => {
-            // 統一使用 name 和 code
             const createdDate = unit.created_at ? new Date(unit.created_at.seconds * 1000).toLocaleDateString() : '-';
             const statusBadge = unit.status === 'inactive' 
                 ? '<span class="badge bg-secondary">停用</span>' 
@@ -99,6 +99,7 @@ export const UnitManagement = {
                     <td>${createdDate}</td>
                     <td>${statusBadge}</td>
                     <td>
+                        <button class="btn btn-sm btn-secondary users-btn" data-id="${unit.id}" title="管理人員">人員</button>
                         <button class="btn btn-sm btn-info edit-btn" data-id="${unit.id}">編輯</button>
                         <button class="btn btn-sm btn-danger delete-btn" data-id="${unit.id}">刪除</button>
                     </td>
@@ -111,19 +112,26 @@ export const UnitManagement = {
     },
 
     bindEvents() {
+        // 新增單位按鈕
         document.getElementById('create-unit-btn')?.addEventListener('click', () => {
             UnitCreate.init(); 
         });
 
+        // 列表按鈕 (事件委派)
         const listContainer = document.getElementById('unit-list-container');
         listContainer?.addEventListener('click', async (e) => {
             const target = e.target;
             const id = target.dataset.id;
 
+            if (!id) return;
+
             if (target.classList.contains('edit-btn')) {
                 UnitEdit.init(id);
             } else if (target.classList.contains('delete-btn')) {
                 await this.handleDelete(id);
+            } else if (target.classList.contains('users-btn')) {
+                // ✅ 開啟人員分配視窗
+                UserAssignment.openDialog(id);
             }
         });
     },
