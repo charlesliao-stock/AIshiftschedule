@@ -1,6 +1,7 @@
 /**
  * js/services/unit.service.js
  * 單位管理服務 (Firebase Firestore 版)
+ * 修正: addUnit -> createUnit
  */
 
 import { FIREBASE_CONFIG } from '../config/firebase.config.js';
@@ -16,7 +17,7 @@ export const UnitService = {
         try {
             const snapshot = await window.firebase.firestore()
                 .collection('units')
-                .orderBy('name', 'asc') // 依照名稱排序
+                .orderBy('name', 'asc')
                 .get();
 
             const units = [];
@@ -27,7 +28,6 @@ export const UnitService = {
                 });
             });
 
-            // 如果資料庫是空的，回傳一個預設範例，方便 UI 顯示
             if (units.length === 0) {
                 console.warn('[UnitService] 無單位資料，回傳預設值');
                 return [
@@ -39,20 +39,22 @@ export const UnitService = {
             return units;
         } catch (error) {
             console.error('[UnitService] 取得單位失敗:', error);
-            // 發生錯誤時回傳空陣列，避免畫面崩潰
             return [];
         }
     },
 
     /**
-     * 新增單位
+     * [修正] 新增單位
+     * 原本叫 addUnit，改為 createUnit 以配合 UI 呼叫
      */
-    async addUnit(unitData) {
+    async createUnit(unitData) {
         try {
-            // 檢查權限 (只有管理員能新增)
+            // 檢查權限
             if (!Auth.isAdmin()) {
                 throw new Error('權限不足：僅管理員可執行此操作');
             }
+
+            console.log('[UnitService] 正在建立單位:', unitData);
 
             const docRef = await window.firebase.firestore()
                 .collection('units')
@@ -62,6 +64,7 @@ export const UnitService = {
                     updated_at: window.firebase.firestore.FieldValue.serverTimestamp()
                 });
             
+            console.log('[UnitService] 單位建立成功, ID:', docRef.id);
             return docRef.id;
         } catch (error) {
             console.error('[UnitService] 新增單位失敗:', error);
