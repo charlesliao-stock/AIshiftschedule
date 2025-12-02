@@ -19,6 +19,8 @@ export const Router = {
     
     init() {
         console.log('[Router] 初始化路由系統...');
+// ✅ 新增這一行：將 Router 掛載到全域變數，讓 HTML onclick 可以呼叫
+        window.router = this;        
         this.defineRoutes();
         
         window.addEventListener('popstate', () => {
