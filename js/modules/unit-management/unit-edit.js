@@ -1,12 +1,11 @@
 /**
  * js/modules/unit-management/unit-edit.js
- * 編輯單位模組 (ES Module 版)
+ * 編輯單位模組 (完整修復版)
  */
 
 import { UnitService } from '../../services/unit.service.js';
 import { Notification } from '../../components/notification.js';
 import { Loading } from '../../components/loading.js';
-import { UnitManagement } from './unit-management.js';
 
 export const UnitEdit = {
     async init(unitId) {
@@ -17,13 +16,14 @@ export const UnitEdit = {
     async loadUnit(unitId) {
         try {
             Loading.show('載入資料...');
+            // 使用新補上的 getUnit 方法
             const unit = await UnitService.getUnit(unitId);
             this.render(unit);
-            Loading.hide();
         } catch (error) {
+            Notification.error('載入失敗: ' + error.message);
+            if (window.router) window.router.loadUnits();
+        } finally {
             Loading.hide();
-            Notification.error('載入失敗');
-            UnitManagement.init();
         }
     },
 
@@ -31,24 +31,32 @@ export const UnitEdit = {
         const container = document.getElementById('main-content');
         container.innerHTML = `
             <div class="page-header">
-                <h1>編輯單位: ${unit.unit_name}</h1>
+                <h1>編輯單位: ${unit.name}</h1>
                 <button class="btn btn-secondary" id="back-btn">← 返回列表</button>
             </div>
             <div class="card">
                 <div class="card-body">
                     <form id="edit-unit-form">
-                        <input type="hidden" name="unit_id" value="${unit.unit_id}">
-                        <div class="form-group">
-                            <label class="form-label">單位名稱</label>
-                            <input type="text" name="unit_name" class="form-input" value="${unit.unit_name}" required>
+                        <input type="hidden" name="id" value="${unit.id}">
+                        
+                        <div class="form-group mb-3">
+                            <label class="form-label">單位代碼</label>
+                            <input type="text" name="code" class="form-input" value="${unit.code || ''}" required>
                         </div>
-                        <div class="form-group">
+
+                        <div class="form-group mb-3">
+                            <label class="form-label">單位名稱</label>
+                            <input type="text" name="name" class="form-input" value="${unit.name || ''}" required>
+                        </div>
+                        
+                        <div class="form-group mb-3">
                             <label class="form-label">狀態</label>
                             <select name="status" class="form-select">
                                 <option value="active" ${unit.status === 'active' ? 'selected' : ''}>啟用</option>
                                 <option value="inactive" ${unit.status === 'inactive' ? 'selected' : ''}>停用</option>
                             </select>
                         </div>
+
                         <div class="form-actions">
                             <button type="submit" class="btn btn-primary">儲存變更</button>
                         </div>
@@ -61,26 +69,30 @@ export const UnitEdit = {
     },
 
     bindEvents() {
-        document.getElementById('back-btn')?.addEventListener('click', () => UnitManagement.init());
+        document.getElementById('back-btn')?.addEventListener('click', () => {
+            if (window.router) window.router.loadUnits();
+        });
 
         document.getElementById('edit-unit-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
-            const unitId = formData.get('unit_id');
+            const unitId = formData.get('id');
+            
             const updates = {
-                unit_name: formData.get('unit_name'),
+                code: formData.get('code'),
+                name: formData.get('name'),
                 status: formData.get('status')
             };
 
             try {
                 Loading.show('儲存中...');
                 await UnitService.updateUnit(unitId, updates);
-                Loading.hide();
                 Notification.success('更新成功');
-                UnitManagement.init();
+                if (window.router) window.router.loadUnits();
             } catch (error) {
-                Loading.hide();
                 Notification.error('更新失敗: ' + error.message);
+            } finally {
+                Loading.hide();
             }
         });
     }
