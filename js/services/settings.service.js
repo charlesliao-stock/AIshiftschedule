@@ -1,82 +1,166 @@
 /**
  * js/services/settings.service.js
- * 系統設定服務
+ * 系統設定服務 (Firebase Firestore 版) - 整合所有設定 CRUD
  */
 
-import { FIREBASE_CONFIG } from '../config/firebase.config.js';
-import { Auth } from '../core/auth.js'; // ✅ 確保引用正確
+import { Auth } from '../core/auth.js';
 
 export const SettingsService = {
     
-    /**
-     * [新增] 取得班別設定
-     * 修復: SettingsService.getShifts is not a function
-     */
+    // ==================== 班別設定 (Shifts) ====================
     async getShifts() {
-        console.log('[SettingsService] 載入班別設定...');
         try {
-            // 嘗試從資料庫讀取
-            const doc = await window.firebase.firestore()
-                .collection('settings')
-                .doc('shifts')
-                .get();
-
-            if (doc.exists && doc.data().items) {
-                return doc.data().items;
-            }
-
-            // 如果資料庫沒資料，回傳預設班別
-            console.warn('[SettingsService] 找不到班別設定，使用預設值');
-            return [
-                { id: 'D', name: '白班', code: 'D', color: '#ffedc4', startTime: '08:00', endTime: '16:00' },
-                { id: 'E', name: '小夜', code: 'E', color: '#ffd1d1', startTime: '16:00', endTime: '00:00' },
-                { id: 'N', name: '大夜', code: 'N', color: '#d1e7ff', startTime: '00:00', endTime: '08:00' },
-                { id: 'OFF', name: '預休', code: 'OFF', color: '#e0e0e0', startTime: '', endTime: '' }
-            ];
-
+            const snapshot = await window.firebase.firestore().collection('settings').doc('shifts').get();
+            return snapshot.exists && snapshot.data().items ? snapshot.data().items : [];
         } catch (error) {
-            console.error('[SettingsService] 載入班別失敗:', error);
-            // 發生錯誤時回傳空陣列避免當機
+            console.error('取得班別失敗:', error);
             return [];
         }
     },
 
-    /**
-     * 取得一般系統設定
-     */
-    async getSettings() {
+    async saveShift(shiftData) {
         try {
-            const doc = await window.firebase.firestore()
-                .collection('settings')
-                .doc('general')
-                .get();
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            const db = window.firebase.firestore();
+            const ref = db.collection('settings').doc('shifts');
+            
+            // 使用 Transaction 確保資料一致性
+            await db.runTransaction(async (transaction) => {
+                const doc = await transaction.get(ref);
+                let items = doc.exists && doc.data().items ? doc.data().items : [];
                 
+                // 檢查是否為更新
+                const index = items.findIndex(i => i.id === shiftData.id);
+                if (index > -1) {
+                    items[index] = shiftData;
+                } else {
+                    items.push(shiftData);
+                }
+                
+                transaction.set(ref, { items }, { merge: true });
+            });
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async deleteShift(shiftId) {
+        try {
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            const db = window.firebase.firestore();
+            const ref = db.collection('settings').doc('shifts');
+            
+            await db.runTransaction(async (transaction) => {
+                const doc = await transaction.get(ref);
+                if (!doc.exists) return;
+                
+                const items = doc.data().items.filter(i => i.id !== shiftId);
+                transaction.set(ref, { items }, { merge: true });
+            });
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    // ==================== 組別設定 (Groups) ====================
+    async getGroups() {
+        try {
+            const snapshot = await window.firebase.firestore().collection('settings').doc('groups').get();
+            return snapshot.exists && snapshot.data().items ? snapshot.data().items : [];
+        } catch (error) {
+            console.error('取得組別失敗:', error);
+            return [];
+        }
+    },
+
+    async saveGroups(groups) {
+        try {
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            await window.firebase.firestore().collection('settings').doc('groups').set({ items: groups }, { merge: true });
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    // ==================== 人員設定 (Staff) ====================
+    async getStaff() {
+        try {
+            const snapshot = await window.firebase.firestore().collection('staff').get();
+            const staff = [];
+            snapshot.forEach(doc => staff.push({ id: doc.id, ...doc.data() }));
+            return staff;
+        } catch (error) {
+            console.error('取得人員失敗:', error);
+            return [];
+        }
+    },
+
+    async saveStaff(staffData) {
+        try {
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            const db = window.firebase.firestore();
+            
+            if (staffData.id) {
+                await db.collection('staff').doc(staffData.id).set(staffData, { merge: true });
+            } else {
+                const newRef = db.collection('staff').doc();
+                await newRef.set({ ...staffData, id: newRef.id });
+            }
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async deleteStaff(staffId) {
+        try {
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            await window.firebase.firestore().collection('staff').doc(staffId).delete();
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    // ==================== 假日設定 (Holidays) ====================
+    async getHolidays(year) {
+        try {
+            let query = window.firebase.firestore().collection('settings').doc('holidays');
+            const snapshot = await query.get();
+            let holidays = snapshot.exists && snapshot.data().items ? snapshot.data().items : [];
+            
+            // 如果指定年份，進行篩選
+            if (year) {
+                holidays = holidays.filter(h => h.applicableYear === 'all' || h.applicableYear == year);
+            }
+            return holidays;
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async saveHolidays(holidays) {
+        try {
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            await window.firebase.firestore().collection('settings').doc('holidays').set({ items: holidays }, { merge: true });
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    // ==================== 勞基法設定 (Labor Rules) ====================
+    async getLaborLawSettings() {
+        try {
+            const doc = await window.firebase.firestore().collection('settings').doc('labor_rules').get();
             return doc.exists ? doc.data() : {};
         } catch (error) {
-            console.error('[SettingsService] 載入設定失敗:', error);
             return {};
         }
     },
 
-    /**
-     * 儲存設定
-     */
-    async saveSettings(type, data) {
+    async saveLaborLawSettings(settings) {
         try {
-            // 檢查權限
-            if (!Auth.isAdmin()) {
-                throw new Error('只有管理員可以修改設定');
-            }
-
-            await window.firebase.firestore()
-                .collection('settings')
-                .doc(type)
-                .set(data, { merge: true });
-                
-            console.log(`[SettingsService] 設定已儲存: ${type}`);
-            return true;
+            if (!Auth.isAdmin()) throw new Error('權限不足');
+            await window.firebase.firestore().collection('settings').doc('labor_rules').set(settings, { merge: true });
         } catch (error) {
-            console.error('[SettingsService] 儲存失敗:', error);
             throw error;
         }
     }
