@@ -4,7 +4,7 @@
  */
 
 import { API_CONFIG } from '../config/api.config.js';
-import { getCurrentUnit } from '../core/auth.js';
+import { Auth } from '../core/auth.js';
 
 class SettingsService {
     constructor() {
@@ -16,7 +16,7 @@ class SettingsService {
      */
     async getShifts() {
         try {
-            const unit = await getCurrentUnit();
+            const unit = await Auth.getUserUnit();
             
             const response = await fetch(this.apiBaseUrl, {
                 method: 'POST',
