@@ -4,7 +4,7 @@
  */
 
 import { API_CONFIG } from '../config/api.config.js';
-import { getCurrentUser, getCurrentUnit } from '../core/auth.js';
+import { Auth } from '../core/auth.js';
 
 class PreScheduleService {
     constructor() {
@@ -16,7 +16,7 @@ class PreScheduleService {
      */
     async getPreScheduleConfig(month) {
         try {
-            const unit = await getCurrentUnit();
+            const unit = Auth.getUserUnit();
             
             const response = await fetch(this.apiBaseUrl, {
                 method: 'POST',
