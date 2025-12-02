@@ -1,6 +1,6 @@
 /**
  * js/modules/unit-management/unit-management.js
- * 單位管理主模組 (ES Module 版)
+ * 修正版: 配合 UnitService 的欄位名稱
  */
 
 import { UnitService } from '../../services/unit.service.js';
@@ -9,9 +9,6 @@ import { Router } from '../../core/router.js';
 import { Notification } from '../../components/notification.js';
 import { Loading } from '../../components/loading.js';
 import { Modal } from '../../components/modal.js';
-
-// 引入子模組 (如果是用 Router 載入，這裡可能不需要 import，視您的架構而定)
-// 這裡假設 Create 和 Edit 是由 Router 處理路由切換，或是由本模組動態渲染
 import { UnitCreate } from './unit-create.js';
 import { UnitEdit } from './unit-edit.js';
 
@@ -22,10 +19,9 @@ export const UnitManagement = {
     async init() {
         console.log('[UnitManagement] 初始化...');
         
-        // 權限檢查
         if (!Auth.isAdmin()) {
             Notification.error('您沒有權限存取此頁面');
-            Router.navigate('/dashboard');
+            window.router.navigate('/dashboard'); // 改用 window.router 避免 import 循環
             return;
         }
 
@@ -62,8 +58,8 @@ export const UnitManagement = {
         } catch (error) {
             Loading.hide();
             Notification.error('載入失敗: ' + error.message);
-            document.getElementById('unit-list-container').innerHTML = 
-                `<div class="error-state">${error.message}</div>`;
+            const container = document.getElementById('unit-list-container');
+            if(container) container.innerHTML = `<div class="error-state">${error.message}</div>`;
         }
     },
 
@@ -82,8 +78,7 @@ export const UnitManagement = {
                     <tr>
                         <th>代碼</th>
                         <th>名稱</th>
-                        <th>人員數</th>
-                        <th>狀態</th>
+                        <th>建立時間</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -91,19 +86,18 @@ export const UnitManagement = {
         `;
 
         this.units.forEach(unit => {
+            // ✅ 修正: 欄位名稱對應 (unit_code -> code, unit_name -> name)
+            // ✅ 修正: unit_id -> id (Firestore 預設 ID 欄位)
+            const createdDate = unit.created_at ? new Date(unit.created_at.seconds * 1000).toLocaleDateString() : '-';
+            
             html += `
                 <tr>
-                    <td>${unit.unit_code}</td>
-                    <td>${unit.unit_name}</td>
-                    <td>${unit.total_staff || 0}</td>
+                    <td>${unit.code || unit.unit_code || ''}</td>
+                    <td>${unit.name || unit.unit_name || ''}</td>
+                    <td>${createdDate}</td>
                     <td>
-                        <span class="status-badge ${unit.status === 'active' ? 'status-open' : 'status-closed'}">
-                            ${unit.status === 'active' ? '啟用中' : '停用'}
-                        </span>
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-info edit-btn" data-id="${unit.unit_id}">編輯</button>
-                        <button class="btn btn-sm btn-danger delete-btn" data-id="${unit.unit_id}">刪除</button>
+                        <button class="btn btn-sm btn-info edit-btn" data-id="${unit.id}">編輯</button>
+                        <button class="btn btn-sm btn-danger delete-btn" data-id="${unit.id}">刪除</button>
                     </td>
                 </tr>
             `;
@@ -114,13 +108,10 @@ export const UnitManagement = {
     },
 
     bindEvents() {
-        // 新增按鈕
         document.getElementById('create-unit-btn')?.addEventListener('click', () => {
-            // 切換到新增視圖
             UnitCreate.init(); 
         });
 
-        // 列表操作按鈕 (事件委派)
         const listContainer = document.getElementById('unit-list-container');
         listContainer?.addEventListener('click', async (e) => {
             const target = e.target;
@@ -141,7 +132,7 @@ export const UnitManagement = {
         try {
             Loading.show('刪除中...');
             await UnitService.deleteUnit(unitId);
-            await this.loadUnits(); // 重新載入列表
+            await this.loadUnits(); 
             Notification.success('單位已刪除');
         } catch (error) {
             Loading.hide();
