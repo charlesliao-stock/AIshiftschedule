@@ -313,7 +313,7 @@ export const Router = {
             // 請確認路徑是否正確： js/modules/units/unit-management.js
             // 注意：有的專案架構可能是 js/modules/unit-management/unit-management.js
             // 如果報錯 404，請檢查這裡的路徑
-            const module = await import('../modules/units/unit-management.js');
+            const module = await import('../modules/unit-management/unit-management.js');
             const UnitManagement = module.UnitManagement || module.default;
             
             if (UnitManagement && UnitManagement.init) {
