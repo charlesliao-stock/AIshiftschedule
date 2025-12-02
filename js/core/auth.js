@@ -100,20 +100,53 @@ export const Auth = {
         return user;
     },
     
-    async loadUserFromFirebase(firebaseUser) {
+async loadUserFromFirebase(firebaseUser) {
         try {
-            const userDoc = await window.firebase.firestore()
+            const userRef = window.firebase.firestore()
                 .collection(FIREBASE_CONFIG.collections.USERS)
-                .doc(firebaseUser.uid)
-                .get();
+                .doc(firebaseUser.uid);
+
+            const userDoc = await userRef.get();
             
+            let userData;
+
             if (!userDoc.exists) {
-                // 如果是管理員第一次登入但資料庫沒資料，這裡可以選擇拋錯，或者自動建立
-                // 為了安全，暫時拋錯
-                throw new Error('使用者資料不存在');
+                console.warn('[Auth] Firestore 中找不到使用者資料，正在自動建立預設資料...');
+
+                // 自動判斷：如果是 admin 帳號，直接給予 admin 權限
+                const isDefaultAdmin = firebaseUser.email === 'admin@hospital.com';
+                
+                // 準備預設資料
+                userData = {
+                    email: firebaseUser.email,
+                    displayName: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+                    role: isDefaultAdmin ? 'admin' : 'viewer', // 自動給予權限
+                    unit_id: 'default',
+                    unit_name: '預設單位',
+                    permissions: {
+                        // 預設給予基本查看權限
+                        can_view_schedule: true,
+                        can_export_data: isDefaultAdmin
+                    },
+                    created_at: window.firebase.firestore.FieldValue.serverTimestamp(),
+                    last_login: window.firebase.firestore.FieldValue.serverTimestamp()
+                };
+
+                // 將新資料寫入 Firestore
+                await userRef.set(userData);
+                console.log('[Auth] 預設使用者資料已建立');
+
+            } else {
+                // 資料存在，直接讀取
+                userData = userDoc.data();
+                
+                // 更新最後登入時間
+                await userRef.update({ 
+                    last_login: window.firebase.firestore.FieldValue.serverTimestamp() 
+                });
             }
-            
-            const userData = userDoc.data();
+
+            // 組合最終回傳的物件
             const user = {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email,
@@ -121,16 +154,10 @@ export const Auth = {
                 role: userData.role,
                 unit_id: userData.unit_id,
                 unit_name: userData.unit_name,
-                permissions: userData.permissions,
-                createdAt: userData.created_at,
+                permissions: userData.permissions || {},
+                createdAt: userData.created_at, // 注意：剛建立時這可能是 serverTimestamp 物件，下次讀取才會是時間
                 lastLogin: new Date().toISOString()
             };
-            
-            // 更新最後登入時間
-            await window.firebase.firestore()
-                .collection(FIREBASE_CONFIG.collections.USERS)
-                .doc(firebaseUser.uid)
-                .update({ last_login: window.firebase.firestore.FieldValue.serverTimestamp() });
             
             this.currentUser = user;
             Storage.saveUser(user);
