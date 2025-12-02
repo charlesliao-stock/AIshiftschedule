@@ -1,115 +1,113 @@
 /**
  * js/modules/settings/settings.js
- * 設定管理主模組 (ES Module 版)
- * 負責分頁切換與子模組載入
+ * 設定管理主模組
  */
 
 import { Auth } from '../../core/auth.js';
 import { Router } from '../../core/router.js';
 import { Notification } from '../../components/notification.js';
 
-// 引入子模組 (假設您會建立這些檔案，若暫時沒有，可先註解)
-import { ShiftManagement } from './shift-management.js';
-import { StaffManagement } from './staff-management.js';
+// ✅ 修正引用：確保路徑正確，且 RuleManagement 有被 export
 import { RuleManagement } from './rule-management.js';
-// import { GroupManagement } from './group-management.js';
-// import { HolidayManagement } from './holiday-management.js';
+
+// 假設之後會有 SystemSettings，目前先略過或註解
+// import { SystemSettings } from './system-settings.js';
 
 export const Settings = {
-    activeTab: 'shifts',
+    container: null,
+    currentTab: 'rules', // 預設分頁
 
     async init() {
         console.log('[Settings] 初始化...');
         
-        // 檢查權限 (排班者或管理員)
-        if (!Auth.isScheduler() && !Auth.isAdmin()) {
-            Notification.error('您沒有權限存取設定');
-            Router.navigate('/dashboard');
+        // 權限檢查
+        if (!Auth.isAdmin() && !Auth.isScheduler()) {
+            Notification.error('權限不足');
+            if (window.router) window.router.navigate('/dashboard');
             return;
         }
 
+        this.container = document.getElementById('settings-container'); // 注意這裡要對應 router.js 裡的 id
+        if (!this.container) {
+            // 如果是直接 loadSettings，可能要找 main-content
+            this.container = document.getElementById('main-content');
+        }
+
         this.renderLayout();
-        this.bindEvents();
+        this.bindTabEvents();
         
-        // 預設載入第一個分頁
-        this.switchTab('shifts');
+        // 載入預設分頁
+        await this.loadTab(this.currentTab);
     },
 
     renderLayout() {
-        const container = document.getElementById('main-content');
-        container.innerHTML = `
-            <div class="page-header">
-                <h1>設定管理</h1>
+        this.container.innerHTML = `
+            <div class="page-header mb-4">
+                <h1>系統設定</h1>
             </div>
             
-            <div class="settings-container">
-                <div class="tabs-nav">
-                    <button class="tab-btn active" data-tab="shifts">班別設定</button>
-                    <button class="tab-btn" data-tab="groups">組別設定</button>
-                    <button class="tab-btn" data-tab="staff">人員管理</button>
-                    <button class="tab-btn" data-tab="rules">排班規則</button>
-                    <button class="tab-btn" data-tab="holidays">假日設定</button>
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" data-tab="rules" href="#">排班規則</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-tab="system" href="#">系統參數</a>
+                        </li>
+                    </ul>
                 </div>
-
-                <div id="settings-content" class="tab-content">
-                    <div class="loader-spinner"></div>
+                <div class="card-body" id="settings-tab-content">
+                    <div class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status"></div>
+                    </div>
                 </div>
             </div>
         `;
     },
 
-    bindEvents() {
-        const nav = document.querySelector('.tabs-nav');
-        nav?.addEventListener('click', (e) => {
-            if (e.target.classList.contains('tab-btn')) {
-                const tab = e.target.dataset.tab;
-                this.switchTab(tab);
-            }
+    bindTabEvents() {
+        const tabs = this.container.querySelectorAll('.nav-link');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', async (e) => {
+                e.preventDefault();
+                
+                // UI 切換
+                tabs.forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                // 載入對應模組
+                const tabName = e.target.dataset.tab;
+                this.currentTab = tabName;
+                await this.loadTab(tabName);
+            });
         });
     },
 
-    async switchTab(tabId) {
-        // 更新按鈕狀態
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.tab === tabId);
-        });
+    async loadTab(tabName) {
+        const contentContainer = document.getElementById('settings-tab-content');
+        contentContainer.innerHTML = ''; // 清空內容
 
-        const content = document.getElementById('settings-content');
-        content.innerHTML = '<div class="loader-spinner"></div>';
-
-        this.activeTab = tabId;
-
-        // 根據 tabId 載入對應模組
-        try {
-            switch (tabId) {
-                case 'shifts':
-                    // 如果有實作 ShiftManagement，呼叫其 init
-                    if (typeof ShiftManagement !== 'undefined') {
-                        await ShiftManagement.init(content); 
-                    } else {
-                        content.innerHTML = '<p class="text-muted">班別管理功能載入中...</p>';
-                    }
-                    break;
-                case 'staff':
-                    if (typeof StaffManagement !== 'undefined') {
-                        await StaffManagement.init(content);
-                    } else {
-                        content.innerHTML = '<p class="text-muted">人員管理功能載入中...</p>';
-                    }
-                    break;
-                case 'rules':
-                    if (typeof RuleManagement !== 'undefined') {
-                        await RuleManagement.init(content);
-                    } else {
-                        content.innerHTML = '<p class="text-muted">規則管理功能載入中...</p>';
-                    }
-                    break;
-                default:
-                    content.innerHTML = `<p class="text-muted">模組 ${tabId} 開發中...</p>`;
-            }
-        } catch (error) {
-            console.error(`載入分頁 ${tabId} 失敗:`, error);
-            content.innerHTML = `<div class="error-state">載入失敗: ${error.message}</div>`;
+        switch (tabName) {
+            case 'rules':
+                if (RuleManagement && RuleManagement.init) {
+                    await RuleManagement.init(contentContainer);
+                } else {
+                    contentContainer.innerHTML = '<div class="alert alert-danger">載入規則模組失敗</div>';
+                }
+                break;
+                
+            case 'system':
+                contentContainer.innerHTML = `
+                    <div class="text-center py-5 text-muted">
+                        <i class="fas fa-tools fa-2x mb-3"></i>
+                        <p>系統參數設定開發中...</p>
+                    </div>
+                `;
+                break;
+                
+            default:
+                contentContainer.innerHTML = '未知的分頁';
         }
     }
 };
