@@ -5,7 +5,7 @@
 
 import { ScheduleService } from '../../services/schedule.service.js';
 import { SettingsService } from '../../services/settings.service.js';
-import Notification from '../../components/notification.js';
+import { Notification } from '../../components/notification.js';
 
 class ScheduleCheck {
     constructor() {
