@@ -1,138 +1,166 @@
 /**
  * js/services/pre-schedule.service.js
- * 預班管理服務 - 負責與 Firebase Firestore 進行資料交互
+ * 預班管理服務 (修正版 - 對接 Google Sheets API)
  */
 
-import { FIREBASE_CONFIG } from '../config/firebase.config.js';
-import { Auth } from '../core/auth.js'; 
+import { API_CONFIG } from '../config/api.config.js';
+import { SheetsService } from './sheets.service.js';
+import { Auth } from '../core/auth.js';
 
 export const PreScheduleService = {
     
     /**
-     * 取得指定年份與月份的預班資料
+     * 取得預班表資料
      */
-    async getPreSchedule(year, month) {
-        console.log(`[PreScheduleService] 載入預班資料: ${year}-${month}`);
-        
+    async getPreSchedule(unitId, month) {
         try {
-            if (!window.firebase) throw new Error("Firebase 未初始化");
-
-            const unit = Auth.getUserUnit();
-            const unitId = unit ? unit.id : null;
-
-            let query = window.firebase.firestore()
-                .collection('pre_schedules')
-                .where('year', '==', parseInt(year))
-                .where('month', '==', parseInt(month));
-
-            if (unitId) {
-                query = query.where('unit_id', '==', unitId);
+            // 對應 api-endpoints.gs 的路由 logic
+            const response = await SheetsService.post(API_CONFIG.ENDPOINTS.PRE_SCHEDULE.GET, {
+                unit_id: unitId,
+                month: month
+            });
+            
+            if (response.success) {
+                return response.data;
             }
+            return null;
+        } catch (error) {
+            console.error('[PreScheduleService] 讀取失敗:', error);
+            throw error;
+        }
+    },
 
-            const snapshot = await query.get();
-            const schedules = [];
-            snapshot.forEach(doc => {
-                schedules.push({
-                    id: doc.id,
-                    ...doc.data()
-                });
+    /**
+     * 取得預班設定
+     */
+    async getPreScheduleConfig(month) {
+        try {
+            const unit = Auth.getUserUnit();
+            if (!unit) return null;
+
+            // 若 API_CONFIG 未定義 GET_CONFIG，則使用 'get-status'
+            const action = API_CONFIG.ENDPOINTS.PRE_SCHEDULE.GET_CONFIG || 'get-status';
+            
+            const response = await SheetsService.post(action, {
+                unit_id: unit.id,
+                month: month
             });
 
-            console.log(`[PreScheduleService] 成功載入 ${schedules.length} 筆資料`);
-            return schedules;
-
-        } catch (error) {
-            console.error('[PreScheduleService] 載入失敗:', error);
-            return []; 
-        }
-    },
-
-    /**
-     * [新增] 取得預班設定 (規則、班別定義等)
-     * 修復: PreScheduleService.getPreScheduleConfig is not a function
-     */
-    async getPreScheduleConfig() {
-        console.log('[PreScheduleService] 載入預班設定...');
-        try {
-            // 嘗試從資料庫讀取設定 (假設存放在 settings/pre_schedule)
-            const doc = await window.firebase.firestore()
-                .collection('settings')
-                .doc('pre_schedule')
-                .get();
-
-            if (doc.exists) {
-                return doc.data();
-            } 
-            
-            // 如果資料庫沒設定，回傳「預設值」讓畫面能正常顯示
-            // 這樣就不會報錯了
-            console.warn('[PreScheduleService] 找不到設定，使用預設值');
-            return {
-                isOpen: true,           // 是否開放預班
-                deadlineDay: 25,        // 每月截止日
-                maxRequests: 5,         // 每人最多預選數
-                shifts: [               // 可選班別定義
-                    { id: 'D', name: '白班', color: '#ffedc4' },
-                    { id: 'E', name: '小夜', color: '#ffd1d1' },
-                    { id: 'N', name: '大夜', color: '#d1e7ff' },
-                    { id: 'OFF', name: '預休', color: '#e0e0e0' }
-                ]
-            };
-
+            if (response.success) {
+                return response.data;
+            }
+            return null;
         } catch (error) {
             console.error('[PreScheduleService] 取得設定失敗:', error);
-            // 發生錯誤時回傳空物件，避免崩潰
-            return { isOpen: true, shifts: [] };
+            // 回傳安全預設值
+            return { status: 'draft', isOpen: false };
         }
     },
 
     /**
-     * 儲存或更新預班申請
+     * 儲存預班設定 (狀態)
      */
-    async savePreSchedule(data) {
-        console.log('[PreScheduleService] 儲存預班申請:', data);
+    async savePreScheduleConfig(configData) {
         try {
-            const collectionRef = window.firebase.firestore().collection('pre_schedules');
             const unit = Auth.getUserUnit();
-            const payload = {
-                ...data,
-                unit_id: data.unit_id || (unit ? unit.id : 'default'),
-                unit_name: data.unit_name || (unit ? unit.name : '預設單位')
+            // 對應 pre-schedule-api.gs -> setPreScheduleStatus
+            const response = await SheetsService.post('set-status', {
+                unit_id: unit.id,
+                month: configData.month,
+                status: configData.status,
+                open_date: configData.openDate,
+                close_date: configData.closeDate,
+                timestamp: new Date().toISOString()
+            });
+
+            if (!response.success) throw new Error(response.message);
+            return true;
+        } catch (error) {
+            console.error('[PreScheduleService] 儲存設定失敗:', error);
+            throw error;
+        }
+    },
+
+    /**
+     * 提交預班
+     */
+    async submitPreSchedule(params) {
+        try {
+            const response = await SheetsService.post(API_CONFIG.ENDPOINTS.PRE_SCHEDULE.SAVE, {
+                unit_id: params.unitId,
+                month: params.month,
+                staff_id: params.staffId,
+                schedule: params.data,
+                is_extra: false,
+                timestamp: new Date().toISOString()
+            });
+
+            if (!response.success) throw new Error(response.message);
+            return true;
+        } catch (error) {
+            console.error('[PreScheduleService] 提交失敗:', error);
+            throw error;
+        }
+    },
+
+    /**
+     * 新增額外預班
+     */
+    async addExtraPreSchedule(params) {
+        try {
+            // 轉換為後端需要的單一更新格式
+            const scheduleData = {};
+            scheduleData[params.date] = {
+                shift: params.shift,
+                is_extra: true,
+                reason: params.reason
             };
 
-            if (payload.id) {
-                await collectionRef.doc(payload.id).update({
-                    ...payload,
-                    updatedAt: window.firebase.firestore.FieldValue.serverTimestamp()
-                });
-                return payload.id;
-            } else {
-                const docRef = await collectionRef.add({
-                    ...payload,
-                    createdAt: window.firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: window.firebase.firestore.FieldValue.serverTimestamp()
-                });
-                return docRef.id;
-            }
+            const response = await SheetsService.post(API_CONFIG.ENDPOINTS.PRE_SCHEDULE.SAVE, {
+                unit_id: params.unitId,
+                month: params.month,
+                staff_id: params.staffId,
+                schedule: scheduleData,
+                is_extra: true,
+                timestamp: new Date().toISOString()
+            });
+
+            if (!response.success) throw new Error(response.message);
+            return true;
         } catch (error) {
-            console.error('[PreScheduleService] 儲存失敗:', error);
+            console.error('[PreScheduleService] 新增額外預班失敗:', error);
             throw error;
+        }
+    },
+    
+    /**
+     * 檢查衝突
+     */
+    async checkPreScheduleConflicts(unitId, month) {
+        try {
+            const response = await SheetsService.post('check-conflicts', {
+                unit_id: unitId,
+                month: month
+            });
+            return response.success ? response.data : [];
+        } catch (error) {
+            return [];
         }
     },
 
     /**
-     * 刪除預班申請
+     * 取得統計
      */
-    async deletePreSchedule(id) {
+    async getPreScheduleStatistics(month) {
         try {
-            await window.firebase.firestore()
-                .collection('pre_schedules')
-                .doc(id)
-                .delete();
-            console.log(`[PreScheduleService] 已刪除: ${id}`);
+            const unit = Auth.getUserUnit();
+            const response = await SheetsService.post('get-stats', {
+                unit_id: unit.id,
+                month: month
+            });
+            return response.success ? response.data : {};
         } catch (error) {
-            console.error('[PreScheduleService] 刪除失敗:', error);
-            throw error;
+            return {};
         }
     }
 };
