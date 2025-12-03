@@ -1,19 +1,20 @@
 /**
  * js/core/storage.js
  * 本地儲存管理 (ES Module 版)
+ * 封裝 localStorage 與 sessionStorage 操作，並提供型別安全的方法
  */
 
 import { CONSTANTS } from '../config/constants.js';
 
 export const Storage = {
-    // ==================== localStorage 操作 ====================
+    // ==================== localStorage 核心操作 ====================
     
     set(key, value) {
         try {
             const jsonValue = JSON.stringify(value);
             localStorage.setItem(key, jsonValue);
         } catch (error) {
-            console.error('儲存失敗:', error);
+            console.error('[Storage] 儲存失敗:', error);
         }
     },
     
@@ -23,7 +24,7 @@ export const Storage = {
             if (item === null) return defaultValue;
             return JSON.parse(item);
         } catch (error) {
-            console.error('讀取失敗:', error);
+            console.error('[Storage] 讀取失敗:', error);
             return defaultValue;
         }
     },
@@ -32,26 +33,27 @@ export const Storage = {
         try {
             localStorage.removeItem(key);
         } catch (error) {
-            console.error('刪除失敗:', error);
+            console.error('[Storage] 刪除失敗:', error);
         }
     },
     
     clear() {
         try {
             localStorage.clear();
+            console.log('[Storage] LocalStorage 已清空');
         } catch (error) {
-            console.error('清空失敗:', error);
+            console.error('[Storage] 清空失敗:', error);
         }
     },
     
-    // ==================== sessionStorage 操作 ====================
+    // ==================== sessionStorage 核心操作 ====================
     
     setSession(key, value) {
         try {
             const jsonValue = JSON.stringify(value);
             sessionStorage.setItem(key, jsonValue);
         } catch (error) {
-            console.error('儲存失敗:', error);
+            console.error('[Storage] Session 儲存失敗:', error);
         }
     },
     
@@ -61,7 +63,7 @@ export const Storage = {
             if (item === null) return defaultValue;
             return JSON.parse(item);
         } catch (error) {
-            console.error('讀取失敗:', error);
+            console.error('[Storage] Session 讀取失敗:', error);
             return defaultValue;
         }
     },
@@ -70,7 +72,7 @@ export const Storage = {
         try {
             sessionStorage.removeItem(key);
         } catch (error) {
-            console.error('刪除失敗:', error);
+            console.error('[Storage] Session 刪除失敗:', error);
         }
     },
     
@@ -78,50 +80,50 @@ export const Storage = {
         try {
             sessionStorage.clear();
         } catch (error) {
-            console.error('清空失敗:', error);
+            console.error('[Storage] Session 清空失敗:', error);
         }
     },
     
-    // ==================== 快捷方法 (使用系統定義的鍵) ====================
+    // ==================== 快捷方法 (業務邏輯封裝) ====================
+    // 使用 CONSTANTS 定義的鍵值，避免字串拼寫錯誤
     
     saveUser(user) {
-        // 使用 Optional Chaining 防止 CONSTANTS 未載入
-        const key = CONSTANTS.STORAGE_KEYS?.USER || 'nursing_schedule_user';
+        const key = CONSTANTS.STORAGE_KEYS?.USER || 'app_user';
         this.set(key, user);
     },
     
     getUser() {
-        const key = CONSTANTS.STORAGE_KEYS?.USER || 'nursing_schedule_user';
+        const key = CONSTANTS.STORAGE_KEYS?.USER || 'app_user';
         return this.get(key);
     },
     
     removeUser() {
-        const key = CONSTANTS.STORAGE_KEYS?.USER || 'nursing_schedule_user';
+        const key = CONSTANTS.STORAGE_KEYS?.USER || 'app_user';
         this.remove(key);
     },
     
     saveToken(token) {
-        const key = CONSTANTS.STORAGE_KEYS?.TOKEN || 'nursing_schedule_token';
+        const key = CONSTANTS.STORAGE_KEYS?.TOKEN || 'app_token';
         this.set(key, token);
     },
     
     getToken() {
-        const key = CONSTANTS.STORAGE_KEYS?.TOKEN || 'nursing_schedule_token';
+        const key = CONSTANTS.STORAGE_KEYS?.TOKEN || 'app_token';
         return this.get(key);
     },
     
     removeToken() {
-        const key = CONSTANTS.STORAGE_KEYS?.TOKEN || 'nursing_schedule_token';
+        const key = CONSTANTS.STORAGE_KEYS?.TOKEN || 'app_token';
         this.remove(key);
     },
     
     saveSettings(settings) {
-        const key = CONSTANTS.STORAGE_KEYS?.SETTINGS || 'nursing_schedule_settings';
+        const key = CONSTANTS.STORAGE_KEYS?.SETTINGS || 'app_settings';
         this.set(key, settings);
     },
     
     getSettings() {
-        const key = CONSTANTS.STORAGE_KEYS?.SETTINGS || 'nursing_schedule_settings';
+        const key = CONSTANTS.STORAGE_KEYS?.SETTINGS || 'app_settings';
         return this.get(key, {});
     },
     
@@ -137,6 +139,9 @@ export const Storage = {
     
     // ==================== 工具方法 ====================
     
+    /**
+     * 檢查 LocalStorage 是否可用
+     */
     isLocalStorageAvailable() {
         try {
             const test = '__storage_test__';
@@ -148,6 +153,9 @@ export const Storage = {
         }
     },
     
+    /**
+     * 計算已使用的空間 (Bytes)
+     */
     getUsedSpace() {
         let total = 0;
         for (let key in localStorage) {
@@ -158,6 +166,9 @@ export const Storage = {
         return total;
     },
     
+    /**
+     * 計算已使用的空間 (可讀格式)
+     */
     getUsedSpaceReadable() {
         const bytes = this.getUsedSpace();
         if (bytes < 1024) return bytes + ' B';
