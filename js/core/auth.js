@@ -1,6 +1,6 @@
 /**
  * js/core/auth.js
- * 使用者認證管理 (含角色權限讀取)
+ * 使用者認證管理 (含角色權限讀取 & 路由支援)
  */
 
 import { 
@@ -38,7 +38,6 @@ export const Auth = {
         // 優先載入本地緩存的使用者 (提升 UI 反應速度)
         const savedUser = Storage.get(CONSTANTS.STORAGE_KEYS.USER);
         if (savedUser) {
-            // 如果本地有存 role，先使用它，等下方 handleAuthStateChange 更新最新狀態
             this.currentUser = savedUser; 
             console.log(`[Auth] 從本地儲存載入使用者: ${savedUser.email} (Role: ${savedUser.role})`);
         }
@@ -59,21 +58,20 @@ export const Auth = {
                 role: CONSTANTS.ROLES.USER // 預設角色為 user
             };
 
-            // 2. 🔥 關鍵：從 Firestore 讀取完整的使用者資料 (包含 role)
+            // 2. 從 Firestore 讀取完整的使用者資料 (包含 role)
             try {
                 const userDoc = await FirebaseService.getDocument('users', user.uid);
                 if (userDoc) {
-                    // 合併資料庫中的欄位 (例如 role, unitId, displayName)
                     profile = { ...profile, ...userDoc };
                 } else {
-                    // 如果是用戶第一次登入且資料庫沒資料，自動建立基本資料
+                    // 第一次登入自動建檔
                     await this.createUserProfile(profile);
                 }
             } catch (error) {
                 console.error('[Auth] 讀取使用者設定檔失敗:', error);
             }
 
-            // 3. 🔥 安全網：強制設定 admin@hospital.com 為系統管理員
+            // 3. 安全網：強制設定 admin@hospital.com 為系統管理員
             if (user.email === 'admin@hospital.com') {
                 profile.role = CONSTANTS.ROLES.ADMIN;
                 console.log('[Auth] 偵測到系統管理員帳號，強制賦予 Admin 權限');
@@ -89,27 +87,18 @@ export const Auth = {
             Storage.remove(CONSTANTS.STORAGE_KEYS.USER);
         }
 
-        // 通知 UI 更新
         this.notifyListeners(this.currentUser);
     },
 
-    /**
-     * 在 Firestore 建立新使用者檔案
-     */
     async createUserProfile(profile) {
         try {
-            // 移除 undefined 的欄位以免 Firestore 報錯
             const safeProfile = JSON.parse(JSON.stringify(profile));
             await FirebaseService.addDocument('users', safeProfile, profile.uid);
-            console.log('[Auth] 已建立新使用者檔案');
         } catch (e) {
             console.error('[Auth] 建立使用者檔案失敗', e);
         }
     },
 
-    /**
-     * 登入
-     */
     async login(email, password) {
         try {
             if (!this.authInstance) throw new Error('Auth not initialized');
@@ -121,9 +110,6 @@ export const Auth = {
         }
     },
 
-    /**
-     * 登出
-     */
     async logout() {
         try {
             if (!this.authInstance) return;
@@ -142,6 +128,15 @@ export const Auth = {
 
     getCurrentUser() {
         return this.currentUser;
+    },
+
+    /**
+     * 🔥 新增：取得使用者角色
+     * 這是 Router 呼叫的方法，之前因為缺少此方法導致報錯
+     */
+    getUserRole() {
+        // 如果還沒登入或沒有角色，預設回傳 'user'，避免 Router 崩潰
+        return this.currentUser?.role || CONSTANTS.ROLES.USER;
     },
 
     async getToken() {
