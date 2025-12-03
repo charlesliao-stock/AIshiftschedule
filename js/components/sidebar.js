@@ -1,6 +1,6 @@
 /**
  * js/components/sidebar.js
- * 側邊欄元件 (ES Module 版)
+ * 側邊欄元件 (修正版 - 路由統一)
  */
 
 import { Auth } from '../core/auth.js';
@@ -54,6 +54,7 @@ export const Sidebar = {
     },
     
     getMenuItems(role) {
+        // 基礎選單
         const baseMenu = [
             { label: '主控台', icon: '📊', path: '/dashboard' },
             { label: '預班管理', icon: '📝', path: '/pre-schedule' },
@@ -62,16 +63,19 @@ export const Sidebar = {
             { label: '統計報表', icon: '📈', path: '/statistics' }
         ];
         
+        // 管理者選單
         if (role === CONSTANTS.ROLES?.ADMIN) {
             return [
                 ...baseMenu,
                 { divider: true },
                 { label: '單位管理', icon: '🏢', path: '/units' },
                 { label: '使用者管理', icon: '👥', path: '/users' },
-                { label: '系統設定', icon: '⚙️', path: '/system' }
+                // 修正：將路徑改為 /settings，統一導向至設定管理頁面
+                { label: '系統設定', icon: '⚙️', path: '/settings' } 
             ];
         }
         
+        // 排班者選單
         if (role === CONSTANTS.ROLES?.SCHEDULER) {
             return [
                 ...baseMenu,
@@ -90,6 +94,7 @@ export const Sidebar = {
                 e.preventDefault();
                 const path = link.getAttribute('data-path');
                 
+                // 手機版點擊後自動收合
                 if (window.innerWidth <= 767) {
                     this.container.classList.remove('show');
                     const overlay = document.querySelector('.sidebar-overlay');
@@ -100,7 +105,7 @@ export const Sidebar = {
             });
         });
         
-        // 這裡需要注意：Router 的回調機制在 ESM 下要確保 Router 實例是同一個
+        // 確保 Router 回調更新 Active 狀態
         Router.afterRouteChange(() => {
             this.updateActiveMenu();
         });
@@ -108,7 +113,8 @@ export const Sidebar = {
     
     updateActiveMenu() {
         if (!this.container) return;
-        const currentPath = window.location.pathname.replace('/index.html', '/') || '/';
+        // 修正路徑比對邏輯，移除 index.html 與尾部斜線
+        const currentPath = window.location.pathname.replace('/index.html', '/').replace(/\/$/, '') || '/';
         const menuLinks = this.container.querySelectorAll('.sidebar-menu-link');
         
         menuLinks.forEach(link => {
