@@ -15,7 +15,8 @@ import { Storage } from './core/storage.js';
 
 // 3. 導入服務
 import { FirebaseService } from './services/firebase.service.js';
-import { ConfigService } from './services/config.service.js'; // 🔥 新增：導入配置服務
+import { ConfigService } from './services/config.service.js';
+import { ScheduleService } from './services/schedule.service.js'; // 🔥 新增：導入排班服務以執行備份
 
 // 4. 導入 UI 元件
 import { Navbar } from './components/navbar.js';
@@ -26,7 +27,7 @@ import { Modal } from './components/modal.js';
 // 顯示系統資訊
 console.log('='.repeat(60));
 const sysName = CONSTANTS?.SYSTEM?.NAME || '護理站排班系統';
-const sysVer = CONSTANTS?.SYSTEM?.VERSION || '2.1.0'; // 版本號微幅更新
+const sysVer = CONSTANTS?.SYSTEM?.VERSION || '2.1.0'; 
 const buildDate = CONSTANTS?.SYSTEM?.BUILD_DATE || new Date().toISOString().split('T')[0];
 console.log(`🏥 ${sysName} v${sysVer}`);
 console.log(`📅 建置日期: ${buildDate}`);
@@ -54,26 +55,33 @@ class Application {
         try {
             this.showLoader('正在初始化系統...');
             
-            // 1. 初始化 Firebase (最優先，因為 ConfigService 需要它)
+            // 1. 初始化 Firebase
             await this.initFirebase();
 
-            // 2. 🔥 新增：載入遠端系統設定 (在認證與 API 呼叫前執行)
+            // 2. 載入遠端系統設定
             await this.initConfig();
             
             // 3. 初始化認證系統
             await this.initAuth();
             
             // 4. 檢查登入狀態
-            const isAuthenticated = Auth.isAuthenticated();
+            const user = Auth.getCurrentUser();
             
-            if (!isAuthenticated) {
+            if (!user) {
                 console.log('[App] 使用者未登入，導向登入頁');
                 this.hideLoader();
-                // 避免在 login.html 頁面重複跳轉
                 if (!window.location.pathname.includes('login.html')) {
                     window.location.href = 'login.html';
                 }
                 return;
+            }
+
+            // 🔥 新增：如果是系統管理員，觸發自動備份檢查 (背景執行)
+            if (user.role === CONSTANTS.ROLES.ADMIN) {
+                // 不使用 await，避免阻擋 UI 載入
+                ScheduleService.checkAndRunAutoBackup().catch(err => 
+                    console.error('[App] Background Backup Error:', err)
+                );
             }
             
             // 5. 初始化 UI 元件
@@ -107,31 +115,21 @@ class Application {
         await FirebaseService.init();
     }
 
-    /**
-     * 🔥 新增：初始化系統設定
-     * 從 Firebase 讀取 API URL 等關鍵參數
-     */
     async initConfig() {
-        // 如果 ConfigService 還沒建立，這裡加個 try-catch 避免整個 App 崩潰
         try {
             if (ConfigService && typeof ConfigService.loadSystemConfig === 'function') {
                 console.log('[App] 載入系統設定...');
                 await ConfigService.loadSystemConfig();
-            } else {
-                console.warn('[App] ConfigService 未定義，跳過遠端設定載入');
             }
         } catch (error) {
             console.warn('[App] 載入遠端設定失敗，將使用預設參數:', error);
-            // 失敗不阻擋流程，繼續使用 api.config.js 的預設值
         }
     }
     
     async initAuth() {
         console.log('[App] 初始化認證系統...');
-        // Auth.init 內部會處理 Firebase 監聽
         await Auth.init();
         
-        // 註冊額外的監聽器以更新 UI
         Auth.onAuthStateChanged((user) => {
             if (!user) {
                 console.log('[App] 使用者登出');
@@ -240,7 +238,6 @@ class Application {
 
 const app = new Application();
 
-// 確保 DOM 載入後啟動
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         app.init();
@@ -249,5 +246,4 @@ if (document.readyState === 'loading') {
     app.init();
 }
 
-// 匯出實例供除錯用
 export default app;
