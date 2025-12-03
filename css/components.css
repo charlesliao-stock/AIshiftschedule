@@ -527,3 +527,26 @@
 .stat-card-change.negative {
     color: var(--error);
 }
+/* 新增的側邊欄樣式 */
+.sidebar-header {
+    padding: 12px 24px 8px 24px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #9ca3af; /* 淺灰色 */
+    letter-spacing: 0.05em;
+}
+
+.sidebar.collapsed .sidebar-header {
+    display: none; /* 收合時隱藏標題 */
+}
+
+.sidebar-divider {
+    height: 1px;
+    background-color: var(--border-color);
+    margin: 8px 16px;
+}
+
+.sidebar.collapsed .sidebar-divider {
+    margin: 8px 10px;
+}
