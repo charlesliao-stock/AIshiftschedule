@@ -18,7 +18,6 @@ export const Router = {
     
     init() {
         console.log('[Router] 初始化路由系統...');
-        // 將 Router 掛載到全域變數，讓 HTML onclick 可以呼叫
         window.router = this;        
         this.defineRoutes();
         
@@ -26,7 +25,6 @@ export const Router = {
             this.handleRoute();
         });
         
-        // 處理初始路由
         this.handleRoute();
     },
     
@@ -88,12 +86,29 @@ export const Router = {
                 roles: null,
                 loadModule: () => this.loadStatistics()
             },
+            // [Week 2] 單位管理
             '/units': {
                 name: 'units',
                 title: '單位管理',
                 requireAuth: true,
                 roles: [CONSTANTS.ROLES?.ADMIN],
                 loadModule: () => this.loadUnits()
+            },
+            // [新增] 使用者管理 (修復跳轉問題)
+            '/users': {
+                name: 'users',
+                title: '使用者管理',
+                requireAuth: true,
+                roles: [CONSTANTS.ROLES?.ADMIN],
+                loadModule: () => this.loadUsers()
+            },
+            // [新增] 系統設定 (修復跳轉問題)
+            '/system': {
+                name: 'system',
+                title: '系統設定',
+                requireAuth: true,
+                roles: [CONSTANTS.ROLES?.ADMIN],
+                loadModule: () => this.loadSystem()
             }
         };
     },
@@ -111,9 +126,10 @@ export const Router = {
         }
         if (cleanPath === '') cleanPath = '/';
 
+        // 路由比對，若找不到則回退至首頁 ('/')
         const route = this.routes[cleanPath] || this.routes['/'];
         
-        console.log('[Router] 導向:', cleanPath);
+        console.log('[Router] 導向:', cleanPath, '->', route.name);
         
         if (route.requireAuth && !Auth.isAuthenticated()) {
             console.log('[Router] 未登入，導向登入頁');
@@ -194,6 +210,12 @@ export const Router = {
                         </div>
                     </div>
                     <div class="col-md-4">
+                        <div class="card p-3 mb-3" onclick="window.router.navigate('/users')" style="cursor:pointer">
+                            <h5><i class="fas fa-users"></i> 使用者管理</h5>
+                            <p>管理全系統使用者帳號</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
                         <div class="card p-3 mb-3" onclick="window.router.navigate('/settings')" style="cursor:pointer">
                             <h5><i class="fas fa-cog"></i> 系統設定</h5>
                             <p>管理班別規則與人員權限</p>
@@ -263,7 +285,7 @@ export const Router = {
 
         try {
             const module = await import('../modules/schedule/schedule.js');
-            const Schedule = module.ScheduleManagement || module.default; // 注意: schedule.js 匯出的是 ScheduleManagement
+            const Schedule = module.ScheduleManagement || module.default;
             
             if (Schedule && Schedule.init) {
                 await Schedule.init();
@@ -276,26 +298,6 @@ export const Router = {
         }
     },
     
-    async loadSwap() {
-        console.log('[Router] 載入換班管理');
-        document.getElementById('main-content').innerHTML = `
-            <div class="text-center mt-5">
-                <i class="fas fa-tools fa-3x text-muted mb-3"></i>
-                <h1>換班管理</h1>
-                <p class="text-muted">功能開發中 (預計 Week 9 開放)</p>
-            </div>`;
-    },
-    
-    async loadStatistics() {
-        console.log('[Router] 載入統計報表');
-        document.getElementById('main-content').innerHTML = `
-            <div class="text-center mt-5">
-                <i class="fas fa-chart-bar fa-3x text-muted mb-3"></i>
-                <h1>統計報表</h1>
-                <p class="text-muted">功能開發中 (預計 Week 7 開放)</p>
-            </div>`;
-    },
-    
     // [Week 2] 單位管理
     async loadUnits() {
         console.log('[Router] 載入單位管理');
@@ -303,7 +305,6 @@ export const Router = {
         mainContent.innerHTML = `<div id="units-container"></div>`;
 
         try {
-            // ✅ 路徑已修正
             const module = await import('../modules/unit-management/unit-management.js');
             const UnitManagement = module.UnitManagement || module.default;
             
@@ -317,8 +318,51 @@ export const Router = {
             mainContent.innerHTML = `<div class="alert alert-danger">載入失敗: ${error.message}</div>`;
         }
     },
+
+    // [新增] 使用者管理 - 暫位符
+    async loadUsers() {
+        console.log('[Router] 載入使用者管理 (開發中)');
+        document.getElementById('main-content').innerHTML = `
+            <div class="text-center mt-5">
+                <div style="font-size: 48px; margin-bottom: 20px;">👥</div>
+                <h1>使用者管理</h1>
+                <p class="text-muted">此功能開發中，敬請期待。</p>
+                <button class="btn btn-secondary mt-3" onclick="window.history.back()">返回</button>
+            </div>`;
+    },
+
+    // [新增] 系統設定 - 暫位符
+    async loadSystem() {
+        console.log('[Router] 載入系統設定 (開發中)');
+        document.getElementById('main-content').innerHTML = `
+            <div class="text-center mt-5">
+                <div style="font-size: 48px; margin-bottom: 20px;">⚙️</div>
+                <h1>系統設定</h1>
+                <p class="text-muted">此功能開發中，敬請期待。</p>
+                <button class="btn btn-secondary mt-3" onclick="window.history.back()">返回</button>
+            </div>`;
+    },
     
-    // ==================== 回調管理 (Sidebar 依賴這些方法) ====================
+    // 尚未開放的功能
+    async loadSwap() {
+        document.getElementById('main-content').innerHTML = `
+            <div class="text-center mt-5">
+                <i class="fas fa-tools fa-3x text-muted mb-3"></i>
+                <h1>換班管理</h1>
+                <p class="text-muted">功能開發中 (預計 Week 9 開放)</p>
+            </div>`;
+    },
+    
+    async loadStatistics() {
+        document.getElementById('main-content').innerHTML = `
+            <div class="text-center mt-5">
+                <i class="fas fa-chart-bar fa-3x text-muted mb-3"></i>
+                <h1>統計報表</h1>
+                <p class="text-muted">功能開發中 (預計 Week 7 開放)</p>
+            </div>`;
+    },
+    
+    // ==================== 回調管理 ====================
     
     beforeRouteChange(callback) {
         this.beforeRouteChangeCallbacks.push(callback);
