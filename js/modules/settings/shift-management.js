@@ -1,6 +1,6 @@
 /**
  * js/modules/settings/shift-management.js
- * 班別管理模組 (ES Module + Firebase 版)
+ * 班別管理模組 (修正版)
  */
 
 import { SettingsService } from '../../services/settings.service.js';
@@ -47,7 +47,7 @@ export const ShiftManagement = {
     renderTable() {
         const container = document.getElementById('shifts-table-container');
         
-        if (this.shifts.length === 0) {
+        if (!this.shifts || this.shifts.length === 0) {
             container.innerHTML = '<div class="alert alert-info">目前沒有班別設定，請新增。</div>';
             return;
         }
@@ -59,7 +59,7 @@ export const ShiftManagement = {
                         <th>代碼</th>
                         <th>名稱</th>
                         <th>時間</th>
-                        <th>顏色</th>
+                        <th>代表色</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -67,13 +67,26 @@ export const ShiftManagement = {
         `;
 
         this.shifts.forEach(shift => {
+            // 修正顏色顯示：增加邊框以確保淺色可見，並顯示色碼
+            const colorBoxStyle = `
+                width: 24px; 
+                height: 24px; 
+                background-color: ${shift.color}; 
+                border-radius: 4px; 
+                border: 1px solid #ccc; 
+                display: inline-block; 
+                vertical-align: middle;
+                margin-right: 8px;
+            `;
+
             html += `
                 <tr>
                     <td><span class="badge bg-light text-dark border">${shift.code}</span></td>
                     <td>${shift.name}</td>
                     <td>${shift.startTime} - ${shift.endTime}</td>
                     <td>
-                        <div style="width: 24px; height: 24px; background-color: ${shift.color}; border-radius: 4px; border: 1px solid #ddd;"></div>
+                        <div style="${colorBoxStyle}"></div>
+                        <span class="text-muted small">${shift.color}</span>
                     </td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary edit-shift-btn" data-id="${shift.id}">編輯</button>
@@ -86,7 +99,6 @@ export const ShiftManagement = {
         html += `</tbody></table>`;
         container.innerHTML = html;
 
-        // 綁定動態生成的按鈕事件
         container.querySelectorAll('.edit-shift-btn').forEach(btn => {
             btn.addEventListener('click', (e) => this.editShift(e.target.dataset.id));
         });
@@ -100,21 +112,21 @@ export const ShiftManagement = {
     },
 
     async addShift() {
+        // Modal.form 已更新，type: 'time' 和 'color' 會自動渲染優化後的 UI
         const result = await Modal.form('新增班別', [
             { name: 'name', label: '班別名稱', placeholder: '例如: 白班', required: true },
             { name: 'code', label: '代碼', placeholder: '例如: D', required: true },
             { name: 'startTime', label: '開始時間', type: 'time', value: '08:00', required: true },
             { name: 'endTime', label: '結束時間', type: 'time', value: '16:00', required: true },
-            { name: 'color', label: '代表色', type: 'color', value: '#ffffff', required: true }
+            { name: 'color', label: '代表色', type: 'color', value: '#E9D5FF', required: true }
         ]);
 
         if (result) {
             try {
                 Loading.show('儲存中...');
-                // 產生一個唯一 ID
                 const newShift = { ...result, id: 'shift_' + Date.now() };
                 await SettingsService.saveShift(newShift);
-                await this.loadShifts();
+                await this.loadShifts(); // 重新載入以更新列表
                 Notification.success('新增成功');
             } catch (error) {
                 Notification.error('儲存失敗: ' + error.message);
@@ -141,7 +153,7 @@ export const ShiftManagement = {
                 Loading.show('更新中...');
                 const updatedShift = { ...shift, ...result };
                 await SettingsService.saveShift(updatedShift);
-                await this.loadShifts();
+                await this.loadShifts(); // 重新載入以更新列表
                 Notification.success('更新成功');
             } catch (error) {
                 Notification.error('更新失敗: ' + error.message);
