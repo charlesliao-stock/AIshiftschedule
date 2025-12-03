@@ -1,6 +1,6 @@
 /**
  * js/config/constants.js
- * 系統常數定義 (權限、選單、儲存鍵值)
+ * 系統常數定義 (權限、選單、儲存鍵值、系統自動化設定)
  */
 
 export const CONSTANTS = {
@@ -11,8 +11,13 @@ export const CONSTANTS = {
         BUILD_DATE: '2025-12-03'
     },
 
-    // ==================== 儲存鍵值 (關鍵修正) ====================
-    // Auth 與 Storage 模組依賴此設定
+    // 🔥 新增：系統自動化設定
+    SYSTEM_CONFIG: {
+        AUTO_BACKUP_DAY: 5,        // 每月 5 號執行上個月的備份
+        BACKUP_RETENTION_MONTHS: 12 // 保留 12 個月的備份紀錄 (預留欄位)
+    },
+
+    // ==================== 儲存鍵值 ====================
     STORAGE_KEYS: {
         USER: 'app_user',                 // 使用者資訊
         TOKEN: 'app_token',               // Auth Token
@@ -26,7 +31,7 @@ export const CONSTANTS = {
     // ==================== 角色定義 ====================
     ROLES: {
         ADMIN: 'admin',       // 系統管理者
-        MANAGER: 'manager',   // 單位管理者 (含排班功能)
+        MANAGER: 'manager',   // 單位管理者
         USER: 'user'          // 一般使用者
     },
 
