@@ -1,6 +1,6 @@
 /**
  * js/core/auth.js
- * 使用者認證管理 (含角色權限讀取 & 路由支援)
+ * 使用者認證管理 (含角色權限讀取 & 完整權限判斷)
  */
 
 import { 
@@ -35,7 +35,7 @@ export const Auth = {
             await this.handleAuthStateChange(user);
         });
 
-        // 優先載入本地緩存的使用者 (提升 UI 反應速度)
+        // 優先載入本地緩存的使用者
         const savedUser = Storage.get(CONSTANTS.STORAGE_KEYS.USER);
         if (savedUser) {
             this.currentUser = savedUser; 
@@ -44,45 +44,40 @@ export const Auth = {
     },
 
     /**
-     * 處理狀態變更 (核心邏輯)
+     * 處理狀態變更
      */
     async handleAuthStateChange(user) {
         if (user) {
-            // 1. 建立基本使用者物件
             let profile = {
                 uid: user.uid,
                 email: user.email,
                 displayName: user.displayName || user.email.split('@')[0],
                 photoURL: user.photoURL,
                 emailVerified: user.emailVerified,
-                role: CONSTANTS.ROLES.USER // 預設角色為 user
+                role: CONSTANTS.ROLES.USER
             };
 
-            // 2. 從 Firestore 讀取完整的使用者資料 (包含 role)
             try {
                 const userDoc = await FirebaseService.getDocument('users', user.uid);
                 if (userDoc) {
                     profile = { ...profile, ...userDoc };
                 } else {
-                    // 第一次登入自動建檔
                     await this.createUserProfile(profile);
                 }
             } catch (error) {
                 console.error('[Auth] 讀取使用者設定檔失敗:', error);
             }
 
-            // 3. 安全網：強制設定 admin@hospital.com 為系統管理員
+            // 強制設定 admin@hospital.com 為系統管理員
             if (user.email === 'admin@hospital.com') {
                 profile.role = CONSTANTS.ROLES.ADMIN;
                 console.log('[Auth] 偵測到系統管理員帳號，強制賦予 Admin 權限');
             }
 
-            // 4. 更新狀態與儲存
             this.currentUser = profile;
             Storage.set(CONSTANTS.STORAGE_KEYS.USER, this.currentUser);
             
         } else {
-            // 使用者已登出
             this.currentUser = null;
             Storage.remove(CONSTANTS.STORAGE_KEYS.USER);
         }
@@ -130,13 +125,19 @@ export const Auth = {
         return this.currentUser;
     },
 
-    /**
-     * 🔥 新增：取得使用者角色
-     * 這是 Router 呼叫的方法，之前因為缺少此方法導致報錯
-     */
     getUserRole() {
-        // 如果還沒登入或沒有角色，預設回傳 'user'，避免 Router 崩潰
         return this.currentUser?.role || CONSTANTS.ROLES.USER;
+    },
+
+    // 🔥 新增：判斷是否為系統管理員
+    isAdmin() {
+        return this.getUserRole() === CONSTANTS.ROLES.ADMIN;
+    },
+
+    // 🔥 新增：判斷是否為單位管理者 (包含 Admin，因為 Admin 權限大於 Manager)
+    isManager() {
+        const role = this.getUserRole();
+        return role === CONSTANTS.ROLES.MANAGER || role === CONSTANTS.ROLES.ADMIN;
     },
 
     async getToken() {
