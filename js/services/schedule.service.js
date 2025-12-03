@@ -1,68 +1,84 @@
 /**
  * js/services/schedule.service.js
- * 排班資料服務 (Firebase Core + Sheets Backup)
+ * 排班資料服務 (含自動化分散備份邏輯)
  */
 import { FirebaseService } from './firebase.service.js';
 import { SheetsService } from './sheets.service.js';
+import { UnitService } from './unit.service.js'; // 需要讀寫單位資料
 
 export const ScheduleService = {
     
-    /**
-     * 取得指定月份的班表
-     * ID 格式: YYYY-MM_UnitID
-     */
+    // ... (getSchedule, saveSchedule 保持不變，請沿用上一段提供的代碼) ...
+
     async getSchedule(unitId, month) {
+        // ... (同前次提供之代碼) ...
         const docId = `${month}_${unitId}`;
         const schedule = await FirebaseService.getDocument('schedules', docId);
-
-        // UX: 如果沒資料，回傳一個基本的空結構，而不是 null 或報錯
         if (!schedule) {
-            console.log(`[Schedule] 查無 ${docId} 資料，回傳初始結構`);
             return {
                 id: docId,
                 month: month,
                 unitId: unitId,
-                status: 'draft', // 草稿狀態
-                shifts: {},      // 正式班表
-                requests: {}     // 預班需求
+                status: 'draft',
+                shifts: {},
+                requests: {}
             };
         }
         return schedule;
     },
 
-    /**
-     * 儲存班表 (寫入 Firebase)
-     */
     async saveSchedule(scheduleData) {
+        // ... (同前次提供之代碼) ...
         const docId = scheduleData.id || `${scheduleData.month}_${scheduleData.unitId}`;
-        
-        // 1. 寫入 Firebase (當作主要儲存)
         await FirebaseService.setDocument('schedules', docId, scheduleData);
-        console.log('[Schedule] Firebase 儲存成功');
-
         return true;
     },
 
     /**
-     * 備份班表到 Google Sheets
-     * 說明：這會呼叫後端 GAS，GAS 會檢查該試算表是否有對應月份的分頁，沒有則自動建立。
+     * 🔥 核心修改：智慧型備份
+     * 自動判斷是否需要建立新檔案
      */
     async backupToSheets(scheduleData) {
         try {
-            console.log('[Schedule] 開始備份至 Google Sheets...');
+            console.log(`[Schedule] 準備備份 ${scheduleData.unitId} 的 ${scheduleData.month} 班表...`);
             
+            // 1. 先取得該單位的設定，看有沒有備份檔案 ID
+            const unit = await UnitService.getUnitById(scheduleData.unitId);
+            let sheetId = unit.backupSheetId;
+            let isNewFile = false;
+
+            // 2. 如果沒有 ID，代表是第一次備份，呼叫 GAS 建立新檔案
+            if (!sheetId) {
+                console.log('[Schedule] 該單位尚無備份檔案，請求 GAS 建立...');
+                const createResult = await SheetsService.post({
+                    action: 'createBackupFile', // 對應後端新功能
+                    fileName: `${unit.name}_排班備份` // 檔名：例如 "第一加護病房_排班備份"
+                });
+
+                sheetId = createResult.spreadsheetId;
+                isNewFile = true;
+
+                // 3. 將新產生的 ID 存回 Firestore Unit 資料，永久綁定
+                await UnitService.updateUnit(unit.id, { backupSheetId: sheetId });
+                console.log(`[Schedule] 新檔案已建立 (ID: ...${sheetId.slice(-6)}) 並綁定至單位`);
+            }
+
+            // 4. 執行備份寫入 (寫入特定的 sheetId)
             await SheetsService.post({
-                action: 'backupSchedule', // 對應 GAS 後端的 function
+                action: 'backupSchedule',
+                spreadsheetId: sheetId, // 指定寫入這個單位的專屬檔案
                 month: scheduleData.month,
-                unitId: scheduleData.unitId,
-                data: scheduleData.shifts // 只備份正式班表
+                unitId: scheduleData.unitId, // 這裡僅作標記用
+                data: scheduleData.shifts
             });
             
-            console.log('[Schedule] 備份成功');
-            return true;
+            const msg = isNewFile ? '已建立新備份檔並完成備份' : '備份成功';
+            return { success: true, message: msg };
+
         } catch (error) {
-            console.error('[Schedule] 備份失敗 (不影響主流程):', error);
-            return false;
+            console.error('[Schedule] 備份流程失敗:', error);
+            // 這裡回傳 false 讓前端可以顯示 "備份失敗，請稍後再試"
+            return { success: false, message: error.message };
         }
     }
 };
