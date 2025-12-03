@@ -15,6 +15,7 @@ import { Storage } from './core/storage.js';
 
 // 3. 導入服務
 import { FirebaseService } from './services/firebase.service.js';
+import { ConfigService } from './services/config.service.js'; // 🔥 新增：導入配置服務
 
 // 4. 導入 UI 元件
 import { Navbar } from './components/navbar.js';
@@ -25,7 +26,7 @@ import { Modal } from './components/modal.js';
 // 顯示系統資訊
 console.log('='.repeat(60));
 const sysName = CONSTANTS?.SYSTEM?.NAME || '護理站排班系統';
-const sysVer = CONSTANTS?.SYSTEM?.VERSION || '1.0.0';
+const sysVer = CONSTANTS?.SYSTEM?.VERSION || '2.1.0'; // 版本號微幅更新
 const buildDate = CONSTANTS?.SYSTEM?.BUILD_DATE || new Date().toISOString().split('T')[0];
 console.log(`🏥 ${sysName} v${sysVer}`);
 console.log(`📅 建置日期: ${buildDate}`);
@@ -53,13 +54,16 @@ class Application {
         try {
             this.showLoader('正在初始化系統...');
             
-            // 1. 初始化 Firebase
+            // 1. 初始化 Firebase (最優先，因為 ConfigService 需要它)
             await this.initFirebase();
+
+            // 2. 🔥 新增：載入遠端系統設定 (在認證與 API 呼叫前執行)
+            await this.initConfig();
             
-            // 2. 初始化認證系統
+            // 3. 初始化認證系統
             await this.initAuth();
             
-            // 3. 檢查登入狀態
+            // 4. 檢查登入狀態
             const isAuthenticated = Auth.isAuthenticated();
             
             if (!isAuthenticated) {
@@ -72,16 +76,16 @@ class Application {
                 return;
             }
             
-            // 4. 初始化 UI 元件
+            // 5. 初始化 UI 元件
             await this.initComponents();
             
-            // 5. 初始化路由
+            // 6. 初始化路由
             await this.initRouter();
             
-            // 6. 註冊全域事件
+            // 7. 註冊全域事件
             this.registerGlobalEvents();
             
-            // 7. 完成初始化
+            // 8. 完成初始化
             this.initialized = true;
             this.hideLoader();
             this.showApp();
@@ -101,6 +105,25 @@ class Application {
     async initFirebase() {
         console.log('[App] 初始化 Firebase...');
         await FirebaseService.init();
+    }
+
+    /**
+     * 🔥 新增：初始化系統設定
+     * 從 Firebase 讀取 API URL 等關鍵參數
+     */
+    async initConfig() {
+        // 如果 ConfigService 還沒建立，這裡加個 try-catch 避免整個 App 崩潰
+        try {
+            if (ConfigService && typeof ConfigService.loadSystemConfig === 'function') {
+                console.log('[App] 載入系統設定...');
+                await ConfigService.loadSystemConfig();
+            } else {
+                console.warn('[App] ConfigService 未定義，跳過遠端設定載入');
+            }
+        } catch (error) {
+            console.warn('[App] 載入遠端設定失敗，將使用預設參數:', error);
+            // 失敗不阻擋流程，繼續使用 api.config.js 的預設值
+        }
     }
     
     async initAuth() {
