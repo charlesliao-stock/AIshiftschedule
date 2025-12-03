@@ -1,6 +1,7 @@
 /**
  * js/core/auth.js
- * 使用者認證管理 (含角色權限讀取 & 完整權限判斷)
+ * 使用者認證管理 (最終完整版)
+ * 包含：Firebase 登入、角色讀取、權限判斷 (isAdmin/isManager)
  */
 
 import { 
@@ -58,6 +59,7 @@ export const Auth = {
             };
 
             try {
+                // 從資料庫讀取最新的角色資料
                 const userDoc = await FirebaseService.getDocument('users', user.uid);
                 if (userDoc) {
                     profile = { ...profile, ...userDoc };
@@ -125,16 +127,24 @@ export const Auth = {
         return this.currentUser;
     },
 
+    /**
+     * 取得使用者角色 (Router 使用)
+     */
     getUserRole() {
         return this.currentUser?.role || CONSTANTS.ROLES.USER;
     },
 
-    // 🔥 新增：判斷是否為系統管理員
+    /**
+     * 判斷是否為系統管理員 (Schedule 使用)
+     * ✅ 這是這次錯誤缺少的關鍵函式
+     */
     isAdmin() {
         return this.getUserRole() === CONSTANTS.ROLES.ADMIN;
     },
 
-    // 🔥 新增：判斷是否為單位管理者 (包含 Admin，因為 Admin 權限大於 Manager)
+    /**
+     * 判斷是否為單位管理者
+     */
     isManager() {
         const role = this.getUserRole();
         return role === CONSTANTS.ROLES.MANAGER || role === CONSTANTS.ROLES.ADMIN;
