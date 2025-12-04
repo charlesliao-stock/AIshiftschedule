@@ -1,5 +1,5 @@
 /**
- * js/core/auth.js (完整版)
+ * js/core/auth.js (最終修正版)
  */
 import { 
     signInWithEmailAndPassword, signOut, onAuthStateChanged 
@@ -63,6 +63,20 @@ export const Auth = {
     },
 
     getCurrentUser() { return this.currentUser; },
+    
+    /**
+     * 取得使用者的單位資訊 (新增)
+     */
+    getUserUnit() {
+        if (!this.currentUser) return null;
+        // 優先讀取 unitId (新版), 兼容 unit_id (舊版)
+        const id = this.currentUser.unitId || this.currentUser.unit_id;
+        const name = this.currentUser.unitName || this.currentUser.unit_name || '未知單位';
+        
+        if (!id) return null;
+        return { id, name };
+    },
+
     isAuthenticated() { return !!this.currentUser; },
     getUserRole() { return this.currentUser?.role || CONSTANTS.ROLES.USER; },
     isAdmin() { return this.getUserRole() === CONSTANTS.ROLES.ADMIN; },
