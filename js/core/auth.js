@@ -1,13 +1,8 @@
 /**
- * js/core/auth.js
- * 使用者認證管理 (最終完整版)
- * 包含：Firebase 登入、角色讀取、權限判斷 (isAdmin/isManager)
+ * js/core/auth.js (完整版)
  */
-
 import { 
-    signInWithEmailAndPassword, 
-    signOut, 
-    onAuthStateChanged 
+    signInWithEmailAndPassword, signOut, onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { FirebaseService } from '../services/firebase.service.js';
 import { Storage } from './storage.js';
@@ -18,153 +13,66 @@ export const Auth = {
     currentUser: null,
     listeners: [],
 
-    /**
-     * 初始化認證模組
-     */
     async init() {
-        console.log('[Auth] 初始化認證系統...');
-        
         this.authInstance = FirebaseService.auth;
-        
-        if (!this.authInstance) {
-            console.error('[Auth] 無法取得 Firebase Auth 實體');
-            throw new Error('Auth Initialization Failed');
-        }
+        if (!this.authInstance) throw new Error('Auth Init Failed');
 
-        // 監聽登入狀態
         onAuthStateChanged(this.authInstance, async (user) => {
             await this.handleAuthStateChange(user);
         });
 
-        // 優先載入本地緩存的使用者
         const savedUser = Storage.get(CONSTANTS.STORAGE_KEYS.USER);
-        if (savedUser) {
-            this.currentUser = savedUser; 
-            console.log(`[Auth] 從本地儲存載入使用者: ${savedUser.email} (Role: ${savedUser.role})`);
-        }
+        if (savedUser) this.currentUser = savedUser; 
     },
 
-    /**
-     * 處理狀態變更
-     */
     async handleAuthStateChange(user) {
         if (user) {
             let profile = {
                 uid: user.uid,
                 email: user.email,
                 displayName: user.displayName || user.email.split('@')[0],
-                photoURL: user.photoURL,
-                emailVerified: user.emailVerified,
                 role: CONSTANTS.ROLES.USER
             };
 
             try {
-                // 從資料庫讀取最新的角色資料
                 const userDoc = await FirebaseService.getDocument('users', user.uid);
-                if (userDoc) {
-                    profile = { ...profile, ...userDoc };
-                } else {
-                    await this.createUserProfile(profile);
-                }
-            } catch (error) {
-                console.error('[Auth] 讀取使用者設定檔失敗:', error);
-            }
+                if (userDoc) profile = { ...profile, ...userDoc };
+                else await FirebaseService.setDocument('users', user.uid, profile);
+            } catch (e) { console.error(e); }
 
-            // 強制設定 admin@hospital.com 為系統管理員
-            if (user.email === 'admin@hospital.com') {
-                profile.role = CONSTANTS.ROLES.ADMIN;
-                console.log('[Auth] 偵測到系統管理員帳號，強制賦予 Admin 權限');
-            }
+            if (user.email === 'admin@hospital.com') profile.role = CONSTANTS.ROLES.ADMIN;
 
             this.currentUser = profile;
             Storage.set(CONSTANTS.STORAGE_KEYS.USER, this.currentUser);
-            
         } else {
             this.currentUser = null;
             Storage.remove(CONSTANTS.STORAGE_KEYS.USER);
         }
-
         this.notifyListeners(this.currentUser);
     },
 
-    async createUserProfile(profile) {
-        try {
-            const safeProfile = JSON.parse(JSON.stringify(profile));
-            await FirebaseService.addDocument('users', safeProfile, profile.uid);
-        } catch (e) {
-            console.error('[Auth] 建立使用者檔案失敗', e);
-        }
-    },
-
     async login(email, password) {
-        try {
-            if (!this.authInstance) throw new Error('Auth not initialized');
-            const userCredential = await signInWithEmailAndPassword(this.authInstance, email, password);
-            return userCredential.user;
-        } catch (error) {
-            console.error('[Auth] 登入失敗:', error.code);
-            throw error;
-        }
+        const cred = await signInWithEmailAndPassword(this.authInstance, email, password);
+        return cred.user;
     },
 
     async logout() {
-        try {
-            if (!this.authInstance) return;
-            await signOut(this.authInstance);
-            Storage.clear(); 
-            window.location.href = 'login.html';
-        } catch (error) {
-            console.error('[Auth] 登出失敗:', error);
-            throw error;
-        }
+        await signOut(this.authInstance);
+        Storage.clear();
+        window.location.href = 'login.html';
     },
 
-    isAuthenticated() {
-        return !!this.currentUser;
-    },
+    getCurrentUser() { return this.currentUser; },
+    isAuthenticated() { return !!this.currentUser; },
+    getUserRole() { return this.currentUser?.role || CONSTANTS.ROLES.USER; },
+    isAdmin() { return this.getUserRole() === CONSTANTS.ROLES.ADMIN; },
+    isManager() { const r = this.getUserRole(); return r === CONSTANTS.ROLES.MANAGER || r === CONSTANTS.ROLES.ADMIN; },
+    
+    async getToken() { return this.authInstance?.currentUser?.getIdToken(); },
 
-    getCurrentUser() {
-        return this.currentUser;
+    onAuthStateChanged(cb) {
+        this.listeners.push(cb);
+        if (this.currentUser) cb(this.currentUser);
     },
-
-    /**
-     * 取得使用者角色 (Router 使用)
-     */
-    getUserRole() {
-        return this.currentUser?.role || CONSTANTS.ROLES.USER;
-    },
-
-    /**
-     * 判斷是否為系統管理員 (Schedule 使用)
-     * ✅ 這是這次錯誤缺少的關鍵函式
-     */
-    isAdmin() {
-        return this.getUserRole() === CONSTANTS.ROLES.ADMIN;
-    },
-
-    /**
-     * 判斷是否為單位管理者
-     */
-    isManager() {
-        const role = this.getUserRole();
-        return role === CONSTANTS.ROLES.MANAGER || role === CONSTANTS.ROLES.ADMIN;
-    },
-
-    async getToken() {
-        if (!this.authInstance?.currentUser) return null;
-        return await this.authInstance.currentUser.getIdToken();
-    },
-
-    onAuthStateChanged(callback) {
-        if (typeof callback === 'function') {
-            this.listeners.push(callback);
-            if (this.currentUser) {
-                callback(this.currentUser);
-            }
-        }
-    },
-
-    notifyListeners(user) {
-        this.listeners.forEach(listener => listener(user));
-    }
+    notifyListeners(u) { this.listeners.forEach(cb => cb(u)); }
 };
