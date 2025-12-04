@@ -9,30 +9,26 @@ import { CONSTANTS } from '../config/constants.js';
 import { Notification } from '../components/notification.js';
 
 export const ScheduleService = {
-    
-    // ==================== 基本讀寫操作 ====================
-
-    async getSchedule(unitId, month) {
-        const docId = `${month}_${unitId}`;
-        const schedule = await FirebaseService.getDocument('schedules', docId);
-        if (!schedule) {
-            return {
-                id: docId,
-                month: month,
-                unitId: unitId,
-                status: 'draft',
-                shifts: {},
-                requests: {}
-            };
-        }
-        return schedule;
-    },
+    // ...
 
     async saveSchedule(scheduleData) {
+        // Doc ID: YYYYMM_unitId (與 pre_schedule 一致)
         const docId = scheduleData.id || `${scheduleData.month}_${scheduleData.unitId}`;
-        await FirebaseService.setDocument('schedules', docId, scheduleData);
+        
+        // 確保寫入 schedules 集合
+        await FirebaseService.setDocument('schedules', docId, {
+            ...scheduleData,
+            updatedAt: new Date().toISOString()
+        });
+        
+        // 🔥 重要：儲存後，若設定為自動備份，可在此觸發 GAS 備份
+        // 但為了效能，建議讓備份改為使用者手動觸發或由 Admin 背景觸發
+        
         return true;
     },
+    
+    // ... (backupToSheets 邏輯保持不變，因為它是專門用來打 GAS 的)
+};
 
     // ==================== 備份功能 (Sheets Integration) ====================
 
