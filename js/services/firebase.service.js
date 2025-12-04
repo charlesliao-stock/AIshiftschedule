@@ -1,6 +1,6 @@
 /**
  * js/services/firebase.service.js
- * Firebase 核心服務 (v2.0 Firebase First 架構)
+ * Firebase 核心服務 (完整版)
  */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { 
@@ -25,10 +25,7 @@ export const FirebaseService = {
             app = initializeApp(FIREBASE_CONFIG.config || FIREBASE_CONFIG);
             db = getFirestore(app);
             auth = getAuth(app);
-            
-            // 嘗試啟用離線快取
-            try { await enableIndexedDbPersistence(db); } catch (e) { /* 忽略環境不支援錯誤 */ }
-            
+            try { await enableIndexedDbPersistence(db); } catch (e) { /* 忽略 */ }
             this.initialized = true;
             console.log('[Firebase] 初始化完成');
         } catch (error) {
@@ -39,8 +36,7 @@ export const FirebaseService = {
     get db() { return db; },
     get auth() { return auth; },
 
-    // --- 通用 CRUD 封裝 (含錯誤處理) ---
-
+    // --- CRUD ---
     async getDocument(collectionName, docId) {
         if (!db) return null;
         try {
@@ -48,7 +44,7 @@ export const FirebaseService = {
             return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
         } catch (error) {
             console.error(`[Firebase] Get ${collectionName}/${docId} Error:`, error);
-            return null; // UX: 失敗回傳 null 而不是 throw
+            return null;
         }
     },
 
@@ -61,7 +57,21 @@ export const FirebaseService = {
             return results;
         } catch (error) {
             console.error(`[Firebase] Get Collection ${collectionName} Error:`, error);
-            return []; // UX: 失敗回傳空陣列
+            return [];
+        }
+    },
+    
+    async queryDocuments(collectionName, field, op, value) {
+        if (!db) return [];
+        try {
+            const q = query(collection(db, collectionName), where(field, op, value));
+            const snap = await getDocs(q);
+            const results = [];
+            snap.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+            return results;
+        } catch (e) {
+            console.error(`[Firebase] Query Error:`, e);
+            return [];
         }
     },
 
@@ -69,8 +79,14 @@ export const FirebaseService = {
         if (!db) throw new Error("DB Offline");
         const payload = { ...data, updated_at: serverTimestamp() };
         if (!data.created_at) payload.created_at = serverTimestamp();
-        
         await setDoc(doc(db, collectionName, docId), payload, { merge });
         return docId;
+    },
+    
+    async addDocument(collectionName, data) {
+         if (!db) throw new Error("DB Offline");
+         const payload = { ...data, created_at: serverTimestamp(), updated_at: serverTimestamp() };
+         const ref = await addDoc(collection(db, collectionName), payload);
+         return ref.id;
     }
 };
