@@ -1,6 +1,6 @@
 /**
  * js/modules/pre-schedule/pre-schedule-view.js
- * 預班表視圖 (ES Module 版 - 完整實作)
+ * 預班表視圖 (ES Module 版 - 最終修正版)
  */
 
 import { Auth } from '../../core/auth.js';
@@ -11,11 +11,6 @@ import { Notification } from '../../components/notification.js';
 import { Modal } from '../../components/modal.js';
 import { PreScheduleService } from '../../services/pre-schedule.service.js';
 import { SettingsService } from '../../services/settings.service.js';
-
-// 引入子模組
-import { PreScheduleConfig } from './pre-schedule-config.js';
-import { PreScheduleSubmit } from './pre-schedule-submit.js';
-import { PreScheduleExtra } from './pre-schedule-extra.js';
 
 export const PreScheduleView = {
     currentMonth: null,
@@ -60,18 +55,28 @@ export const PreScheduleView = {
         try {
             Loading.show('載入預班資料...');
             
+            // 取得單位資訊
             const unit = Auth.getUserUnit();
-            if (!unit) throw new Error('無法取得單位資訊');
+            if (!unit) {
+                // 若無單位，可能是剛註冊或系統員，給予空資料
+                console.warn('無法取得單位資訊，無法載入資料');
+                this.preScheduleData = {};
+                this.statusData = { status: 'draft' };
+                this.shiftsData = [];
+                this.staffData = [];
+                Loading.hide();
+                return;
+            }
             const unitId = unit.id;
             
             const monthStr = `${this.currentYear}${String(this.currentMonth).padStart(2, '0')}`;
             
             // 並行載入所有需要的資料
             const [preSchedule, status, shifts, staff] = await Promise.all([
-                PreScheduleService.getPreSchedule(unitId, monthStr).catch(() => ({})), // 容錯處理
+                PreScheduleService.getPreSchedule(unitId, monthStr).catch(() => ({})), 
                 PreScheduleService.getPreScheduleConfig(monthStr).catch(() => ({ status: 'draft' })),
-                SettingsService.getShifts().catch(() => []),
-                SettingsService.getStaff().catch(() => [])
+                SettingsService.getShifts(unitId).catch(() => []), // 傳入 unitId
+                SettingsService.getStaff(unitId).catch(() => [])   // 🔥 重要修正：傳入 unitId
             ]);
             
             this.preScheduleData = preSchedule || {};
@@ -86,8 +91,7 @@ export const PreScheduleView = {
             Loading.hide();
             console.error('載入資料錯誤:', error);
             Notification.error('載入資料失敗: ' + error.message);
-            // 即使失敗也要渲染基本介面，避免畫面空白
-            this.render(); 
+            this.render(); // 即使失敗也要渲染介面
         }
     },
     
@@ -100,10 +104,8 @@ export const PreScheduleView = {
                    this.userRole === CONSTANTS.ROLES?.ADMIN;
         }
         
-        // 已關閉：都不能編輯
+        // 已關閉或草稿：都不能編輯
         if (this.statusData.status === 'closed') return false;
-        
-        // 草稿：都不能編輯
         if (this.statusData.status === 'draft') return false;
         
         // 開放中：檢查是否過期
@@ -130,7 +132,6 @@ export const PreScheduleView = {
             ${this.renderStatistics()}
         `;
         
-        // 重新綁定事件 (因為 innerHTML 重繪了 DOM)
         this.bindEvents();
     },
     
@@ -144,12 +145,8 @@ export const PreScheduleView = {
                     </p>
                 </div>
                 <div class="header-right">
-                    <button class="btn btn-secondary" id="prev-month-btn">
-                        ← 上個月
-                    </button>
-                    <button class="btn btn-secondary" id="next-month-btn">
-                        下個月 →
-                    </button>
+                    <button class="btn btn-secondary" id="prev-month-btn">← 上個月</button>
+                    <button class="btn btn-secondary" id="next-month-btn">下個月 →</button>
                     ${this.renderHeaderActions()}
                 </div>
             </div>
@@ -159,16 +156,11 @@ export const PreScheduleView = {
     renderHeaderActions() {
         const isScheduler = this.userRole === CONSTANTS.ROLES?.SCHEDULER || 
                           this.userRole === CONSTANTS.ROLES?.ADMIN;
-        
         if (!isScheduler) return '';
         
         return `
-            <button class="btn btn-primary" id="status-config-btn">
-                設定狀態
-            </button>
-            <button class="btn btn-secondary" id="export-btn">
-                匯出
-            </button>
+            <button class="btn btn-primary" id="status-config-btn">設定狀態</button>
+            <button class="btn btn-secondary" id="export-btn">匯出</button>
         `;
     },
     
@@ -215,14 +207,24 @@ export const PreScheduleView = {
     // --- 個人日曆 ---
     renderPersonalCalendar(daysInMonth, prevMonthDays, nextMonthDays) {
         const currentUser = Auth.getCurrentUser();
-        // 假設資料結構是 { staff_schedules: { "staffId": { "date": { shift: "A", is_extra: false } } } }
+        if (!currentUser) return '<div class="alert alert-warning">請先登入</div>';
+
+        // 假設資料結構是 { schedules: { "staffId": { shifts: [...] } } }
+        // 注意：這裡需根據 service 回傳的實際結構調整
+        // 假設 loadData 已經將格式正規化
         const staffSchedule = this.preScheduleData?.staff_schedules?.[currentUser.uid] || {};
+        
+        // 將陣列轉為 Map 方便查詢: { "YYYY-MM-DD": { shift: "D", isExtra: false } }
+        const scheduleMap = {};
+        if (staffSchedule.shifts && Array.isArray(staffSchedule.shifts)) {
+            staffSchedule.shifts.forEach(s => {
+                scheduleMap[s.date] = s;
+            });
+        }
         
         return `
             <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">我的預班</h3>
-                </div>
+                <div class="card-header"><h3 class="card-title">我的預班</h3></div>
                 <div class="card-body">
                     <div class="calendar-container">
                         <div class="calendar-header">
@@ -230,14 +232,14 @@ export const PreScheduleView = {
                                 ${CONSTANTS.WEEKDAYS_SHORT.map(day => `<div class="calendar-weekday">${day}</div>`).join('')}
                             </div>
                         </div>
-                        ${this.renderCalendarDays(staffSchedule, daysInMonth, prevMonthDays, nextMonthDays, currentUser.uid)}
+                        ${this.renderCalendarDays(scheduleMap, daysInMonth, prevMonthDays, nextMonthDays, currentUser.uid)}
                     </div>
                 </div>
             </div>
         `;
     },
     
-    renderCalendarDays(schedule, daysInMonth, prevMonthDays, nextMonthDays, staffId) {
+    renderCalendarDays(scheduleMap, daysInMonth, prevMonthDays, nextMonthDays, staffId) {
         let html = '<div class="calendar-grid">';
         
         // 前月
@@ -246,34 +248,34 @@ export const PreScheduleView = {
             const prevY = this.currentMonth === 1 ? this.currentYear - 1 : this.currentYear;
             const daysInPrev = Utils.getDaysInMonth(prevY, prevM);
             const day = daysInPrev - i + 1;
-            html += this.renderDateCell(prevY, prevM, day, schedule, staffId, true);
+            html += this.renderDateCell(prevY, prevM, day, scheduleMap, staffId, true);
         }
         
         // 當月
         for (let day = 1; day <= daysInMonth; day++) {
-            html += this.renderDateCell(this.currentYear, this.currentMonth, day, schedule, staffId, false);
+            html += this.renderDateCell(this.currentYear, this.currentMonth, day, scheduleMap, staffId, false);
         }
         
         // 下月
         for (let day = 1; day <= nextMonthDays; day++) {
             const nextM = this.currentMonth === 12 ? 1 : this.currentMonth + 1;
             const nextY = this.currentMonth === 12 ? this.currentYear + 1 : this.currentYear;
-            html += this.renderDateCell(nextY, nextM, day, schedule, staffId, true);
+            html += this.renderDateCell(nextY, nextM, day, scheduleMap, staffId, true);
         }
         
         html += '</div>';
         return html;
     },
     
-    renderDateCell(year, month, day, schedule, staffId, isGray) {
+    renderDateCell(year, month, day, scheduleMap, staffId, isGray) {
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const dateObj = new Date(year, month - 1, day);
         const weekday = dateObj.getDay();
         const isWeekend = weekday === 0 || weekday === 6;
         
-        const cellData = schedule[dateStr];
+        const cellData = scheduleMap[dateStr];
         const shift = cellData?.shift || '';
-        const isExtra = cellData?.is_extra || false;
+        const isExtra = cellData?.isExtra || false;
         
         const cellClasses = [
             'calendar-cell',
@@ -328,10 +330,6 @@ export const PreScheduleView = {
 
     renderStaffHeaderRow(daysInMonth, prevMonthDays, nextMonthDays) {
         let html = '<div class="staff-row header-row"><div class="staff-name-cell">姓名</div>';
-        // (略去日期 header 的迴圈邏輯，與上面 renderStaffRow 類似，為節省篇幅)
-        // 實際應用時建議將日期生成邏輯提取為共用函式 getCalendarDates()
-        
-        // 簡單實作當月 Header
         for (let d = 1; d <= daysInMonth; d++) {
             html += `<div class="date-cell">${d}</div>`;
         }
@@ -340,12 +338,19 @@ export const PreScheduleView = {
     },
 
     renderStaffRow(staff, daysInMonth, prevMonthDays, nextMonthDays) {
-        const schedule = this.preScheduleData?.staff_schedules?.[staff.id] || {};
+        // 取得該員工的預班資料
+        // 注意結構：preScheduleData.schedules[staffId].shifts (array)
+        const staffScheduleData = this.preScheduleData?.schedules?.[staff.id] || {};
+        const scheduleMap = {};
+        if (staffScheduleData.shifts && Array.isArray(staffScheduleData.shifts)) {
+            staffScheduleData.shifts.forEach(s => scheduleMap[s.date] = s);
+        }
+
         let html = `<div class="staff-row"><div class="staff-name-cell">${staff.name}</div>`;
         
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${this.currentYear}-${String(this.currentMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-            const cellData = schedule[dateStr];
+            const cellData = scheduleMap[dateStr];
             const shift = cellData?.shift || '';
             const shiftInfo = this.shiftsData.find(s => s.code === shift);
             const style = shiftInfo ? `background-color:${shiftInfo.color}` : '';
@@ -367,24 +372,18 @@ export const PreScheduleView = {
         return firstDay.getDay(); 
     },
 
-    renderStatistics() {
-        // 這裡可以根據需要實作統計區塊
-        return '';
-    },
+    renderStatistics() { return ''; },
 
     // ==================== 事件處理 ====================
 
     bindEvents() {
-        // 按鈕事件
         document.getElementById('prev-month-btn')?.addEventListener('click', () => this.changeMonth(-1));
         document.getElementById('next-month-btn')?.addEventListener('click', () => this.changeMonth(1));
         document.getElementById('status-config-btn')?.addEventListener('click', () => this.openConfigModal());
         document.getElementById('export-btn')?.addEventListener('click', () => this.exportSchedule());
 
-        // 日曆格子點擊 (使用事件委派)
         const container = document.getElementById('pre-schedule-container');
         container?.addEventListener('click', (e) => {
-            // 處理 .calendar-cell 和 .shift-cell 的點擊
             const cell = e.target.closest('.calendar-cell, .shift-cell');
             if (cell && cell.classList.contains('editable')) {
                 const date = cell.dataset.date;
@@ -399,15 +398,17 @@ export const PreScheduleView = {
         let y = this.currentYear;
         if (m > 12) { m = 1; y++; }
         if (m < 1) { m = 12; y--; }
-        
-        // 重新初始化
         const monthStr = `${y}${String(m).padStart(2, '0')}`;
         this.init({ month: monthStr });
     },
 
     onCellClick(dateStr, staffId) {
-        // 顯示班別選擇 Modal
-        const currentShift = this.preScheduleData?.staff_schedules?.[staffId]?.[dateStr]?.shift || '';
+        // 從資料中找尋目前班別
+        // 需根據資料結構調整
+        const staffScheduleData = this.preScheduleData?.schedules?.[staffId] || {};
+        const shiftsArray = staffScheduleData.shifts || [];
+        const currentShiftObj = shiftsArray.find(s => s.date === dateStr);
+        const currentShift = currentShiftObj?.shift || '';
         
         const buttons = this.shiftsData.map(s => ({
             text: `${s.name} (${s.code})`,
@@ -418,7 +419,6 @@ export const PreScheduleView = {
             }
         }));
         
-        // 清除按鈕
         buttons.push({
             text: '清除',
             className: 'btn-danger',
@@ -439,33 +439,40 @@ export const PreScheduleView = {
         try {
             Loading.show('儲存中...');
             
-            // 這裡呼叫 Service 進行更新
-            // 注意：如果是 Submit 模式，可能需要呼叫 PreScheduleSubmit
-            // 如果是 Extra 模式，呼叫 PreScheduleExtra
-            // 這裡簡化為直接呼叫 Service 的通用更新方法
-            
-            const unitId = Auth.getUserUnit().id;
+            const unit = Auth.getUserUnit();
+            const unitId = unit.id;
+            const unitName = unit.name; // 新增：傳遞單位名稱
             const monthStr = `${this.currentYear}${String(this.currentMonth).padStart(2, '0')}`;
             
-            // 取得該員工目前的 schedule
-            let schedule = this.preScheduleData?.staff_schedules?.[staffId] || {};
+            // 取得目前的 schedule map
+            const staffScheduleData = this.preScheduleData?.schedules?.[staffId] || {};
+            const shiftsArray = staffScheduleData.shifts || [];
             
+            // 轉為 Map 操作
+            const scheduleMap = {};
+            shiftsArray.forEach(s => scheduleMap[s.date] = s);
+            
+            // 更新 Map
             if (shiftCode) {
-                schedule[dateStr] = { shift: shiftCode, is_extra: false };
+                scheduleMap[dateStr] = { shift: shiftCode, is_extra: false };
             } else {
-                delete schedule[dateStr];
+                delete scheduleMap[dateStr];
             }
             
+            // 呼叫 Service
             await PreScheduleService.submitPreSchedule({
                 unitId,
+                unitName, // 傳入
                 month: monthStr,
                 staffId,
-                data: schedule
+                // 因為 submitPreSchedule 內部有做 _formatShiftsForStorage，
+                // 但為了配合該函式，我們傳入符合 { date: { shift: 'D', ... } } 結構的物件
+                data: scheduleMap 
             });
             
             Notification.success('更新成功');
-            await this.loadData(); // 重新載入資料
-            this.render(); // 重新渲染
+            await this.loadData();
+            this.render();
             
         } catch (error) {
             Loading.hide();
@@ -473,13 +480,6 @@ export const PreScheduleView = {
         }
     },
 
-    openConfigModal() {
-        // 這裡可以整合 PreScheduleConfig 模組
-        // new PreScheduleConfig().init(...)
-        Notification.info('設定功能開發中');
-    },
-
-    async exportSchedule() {
-        Notification.info('匯出功能開發中');
-    }
+    openConfigModal() { Notification.info('設定功能開發中'); },
+    async exportSchedule() { Notification.info('匯出功能開發中'); }
 };
