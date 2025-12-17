@@ -233,7 +233,6 @@ export class PreScheduleManagePage {
         }
     }
 
-    // ✅ 補回 loadList 函式
     async loadList(uid) {
         if (!uid) return;
         this.targetUnitId = uid;
@@ -247,13 +246,16 @@ export class PreScheduleManagePage {
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-muted">此單位目前無預班表</td></tr>';
                 return;
             }
+            
             const now = new Date().toISOString().split('T')[0];
+
             tbody.innerHTML = this.preSchedules.map((p, index) => {
                 const count = p.staffIds ? p.staffIds.length : 0;
                 let statusBadge = '';
                 if (now < p.settings.openDate) statusBadge = '<span class="badge bg-secondary">未開放</span>';
                 else if (now >= p.settings.openDate && now <= p.settings.closeDate) statusBadge = '<span class="badge bg-success">開放中</span>';
                 else statusBadge = '<span class="badge bg-dark">已截止</span>';
+
                 if (p.status === 'closed') statusBadge = '<span class="badge bg-info text-dark">已封存</span>';
 
                 return `
@@ -263,16 +265,22 @@ export class PreScheduleManagePage {
                         <td><span class="badge bg-light text-dark border">${count} 人</span></td>
                         <td>${statusBadge}</td>
                         <td class="text-end pe-3">
-                            <button class="btn btn-sm btn-outline-primary me-1" onclick="window.routerPage.goToEdit('${p.id}')" title="進入大表編輯"><i class="fas fa-table"></i> 預班</button>
-                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.routerPage.openModal(${index})" title="修改設定"><i class="fas fa-cog"></i> 設定</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deletePreSchedule('${p.id}')" title="刪除"><i class="fas fa-trash"></i></button>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="window.routerPage.goToEdit('${p.id}')" title="進入大表編輯">
+                                <i class="fas fa-table"></i> 預班
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.routerPage.openModal(${index})" title="修改設定">
+                                <i class="fas fa-cog"></i> 設定
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deletePreSchedule('${p.id}')" title="刪除">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </td>
                     </tr>`;
             }).join('');
         } catch (e) { console.error(e); tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">載入失敗</td></tr>'; }
     }
 
-    // ✅ 同步人員資料功能
+    // ✅ 新增：手動同步人員資料 (Sync Staff)
     async syncStaffInfo() {
         if(!confirm("確定要從「人員管理」資料庫同步最新的人員資訊（姓名、職級、所屬單位）嗎？")) return;
         
@@ -281,24 +289,27 @@ export class PreScheduleManagePage {
 
         try {
             const uids = this.selectedStaff.map(s => s.uid);
+            // 重新抓取資料
             const promises = uids.map(uid => userService.getUserData(uid));
             const freshUsers = await Promise.all(promises);
             const userMap = {};
             freshUsers.forEach(u => { if(u) userMap[u.uid] = u; });
 
+            // 更新 selectedStaff 內容
             this.selectedStaff = this.selectedStaff.map(s => {
                 const fresh = userMap[s.uid];
                 if (fresh) {
                     return {
-                        ...s,
+                        ...s, // 保留原有 group 等設定
                         name: fresh.name,
                         rank: fresh.rank,
                         staffId: fresh.staffId,
                         unitId: fresh.unitId,
+                        // 重新判斷是否為支援人員
                         isSupport: fresh.unitId !== this.targetUnitId
                     };
                 }
-                return s;
+                return s; // 若該員已被刪除，保留舊資料或移除視需求而定，此處保留
             });
             
             this.renderStaffList(this.unitData.groups || []);
@@ -313,8 +324,10 @@ export class PreScheduleManagePage {
 
     async openModal(index = null) {
         if (!this.targetUnitId) { alert("請先選擇單位"); return; }
+        
         const form = document.getElementById('pre-form');
         if (form) form.reset();
+        
         document.getElementById('search-results-dropdown').innerHTML = '';
         this.isEditMode = (index !== null);
         
@@ -339,6 +352,7 @@ export class PreScheduleManagePage {
             document.getElementById('edit-maxHoliday').value = s.maxHoliday || 2;
             document.getElementById('edit-reserved').value = s.reservedStaff || 0;
             document.getElementById('edit-showNames').checked = !!s.showOtherNames;
+            
             const limit = s.shiftTypesLimit || '2';
             document.getElementById('edit-shiftTypes').value = limit;
             document.getElementById('edit-allow3').checked = !!s.allowThreeTypesVoluntary;
@@ -347,40 +361,56 @@ export class PreScheduleManagePage {
             const savedSettings = data.staffSettings || {};
             const supportStaffIds = data.supportStaffIds || [];
             
-            // 優先讀取 Snapshot
+            // ✅ 修正：優先使用儲存的 Snapshot 資料
             const savedSnapshots = data.staffSnapshots || [];
+            
             if (savedSnapshots.length > 0) {
+                // 使用快照資料 (不自動更新)
                 this.selectedStaff = savedSnapshots.map(s => ({
-                    uid: s.uid, name: s.name, rank: s.rank, staffId: s.staffId,
-                    unitId: s.unitId, tempGroup: savedSettings[s.uid]?.group || s.group || '',
+                    uid: s.uid,
+                    name: s.name,
+                    rank: s.rank,
+                    staffId: s.staffId,
+                    unitId: s.unitId, // Snapshot 中有 unitId
+                    tempGroup: savedSettings[s.uid]?.group || s.group || '',
                     isSupport: supportStaffIds.includes(s.uid) || s.unitId !== this.targetUnitId
                 }));
             } else {
+                // 舊資料兼容：重新抓取
                 const savedStaffIds = data.staffIds || [];
                 const promises = savedStaffIds.map(uid => userService.getUserData(uid));
                 const users = await Promise.all(promises);
+
                 this.selectedStaff = users.filter(u => u).map(s => ({
-                    uid: s.uid, name: s.name, rank: s.rank, staffId: s.staffId, unitId: s.unitId,
+                    uid: s.uid, name: s.name, rank: s.rank, staffId: s.staffId,
+                    unitId: s.unitId,
                     tempGroup: savedSettings[s.uid]?.group || s.group || '',
                     isSupport: supportStaffIds.includes(s.uid) || s.unitId !== this.targetUnitId
                 }));
             }
+            
             this.renderGroupInputs(groups, s.groupLimits || {});
+
         } else {
             document.getElementById('modal-title').textContent = "新增預班表";
             document.getElementById('edit-month').disabled = false;
+            
             const today = new Date();
             const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
             document.getElementById('edit-month').value = nextMonth.toISOString().slice(0, 7);
+            
             this.setDefaultDates(); 
             this.renderGroupInputs(groups, {});
             this.handleTypeLimitChange('2');
+            
             const staff = await userService.getUsersByUnit(this.targetUnitId);
             this.selectedStaff = staff.map(s => ({ 
                 uid: s.uid, name: s.name, rank: s.rank, staffId: s.staffId, 
-                unitId: s.unitId, tempGroup: s.group || '', isSupport: false
+                unitId: s.unitId,
+                tempGroup: s.group || '', isSupport: false
             }));
         }
+
         this.renderStaffList(groups);
         this.modal.show();
     }
@@ -395,6 +425,7 @@ export class PreScheduleManagePage {
             const unitBadge = isSupport 
                 ? `<span class="badge bg-warning text-dark" title="原單位: ${this.unitMap[u.unitId]||u.unitId}">支援</span>` 
                 : `<span class="badge bg-light text-dark border">本單位</span>`;
+            
             const nameDisplay = isSupport 
                 ? `${u.name} <span class="text-muted small">(${this.unitMap[u.unitId] || '外'})</span>` 
                 : u.name;
@@ -412,7 +443,9 @@ export class PreScheduleManagePage {
                     </select>
                 </td>
                 <td>
-                    <button type="button" class="btn btn-sm text-danger" onclick="window.routerPage.removeStaff(${idx})"><i class="fas fa-times"></i></button>
+                    <button type="button" class="btn btn-sm text-danger" onclick="window.routerPage.removeStaff(${idx})">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </td>
             </tr>
         `}).join('');
@@ -421,32 +454,36 @@ export class PreScheduleManagePage {
     updateStaffGroup(idx, val) { this.selectedStaff[idx].tempGroup = val; }
     removeStaff(idx) { this.selectedStaff.splice(idx, 1); this.renderStaffList(this.unitData.groups || []); }
 
-    renderGroupInputs(groups, values={}) { 
-        const container = document.getElementById('group-limits-container'); 
-        if(groups.length===0){container.innerHTML='<div class="text-muted small">無組別</div>';return;} 
-        container.innerHTML=`<div class="table-responsive"><table class="table table-bordered table-sm text-center mb-0 align-middle"><thead class="table-light"><tr><th>組別</th><th>每班至少</th><th>小夜至少</th><th>大夜至少</th><th>小夜最多</th><th>大夜最多</th></tr></thead><tbody>${groups.map(g=>{const v=values[g]||{};return `<tr><td class="fw-bold bg-light">${g}</td><td><input type="number" class="form-control form-control-sm text-center g-min-d" data-group="${g}" value="${v.minD??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-e" data-group="${g}" value="${v.minE??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-n" data-group="${g}" value="${v.minN??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-max-e" data-group="${g}" value="${v.maxE??''}" placeholder="不限"></td><td><input type="number" class="form-control form-control-sm text-center g-max-n" data-group="${g}" value="${v.maxN??''}" placeholder="不限"></td></tr>`;}).join('')}</tbody></table></div>`; 
-    }
+    renderGroupInputs(groups, values={}) { /*...同前版...*/ const container = document.getElementById('group-limits-container'); if(groups.length===0){container.innerHTML='<div class="text-muted small">無組別</div>';return;} container.innerHTML=`<div class="table-responsive"><table class="table table-bordered table-sm text-center mb-0 align-middle"><thead class="table-light"><tr><th>組別</th><th>每班至少</th><th>小夜至少</th><th>大夜至少</th><th>小夜最多</th><th>大夜最多</th></tr></thead><tbody>${groups.map(g=>{const v=values[g]||{};return `<tr><td class="fw-bold bg-light">${g}</td><td><input type="number" class="form-control form-control-sm text-center g-min-d" data-group="${g}" value="${v.minD??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-e" data-group="${g}" value="${v.minE??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-n" data-group="${g}" value="${v.minN??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-max-e" data-group="${g}" value="${v.maxE??''}" placeholder="不限"></td><td><input type="number" class="form-control form-control-sm text-center g-max-n" data-group="${g}" value="${v.maxN??''}" placeholder="不限"></td></tr>`;}).join('')}</tbody></table></div>`; }
 
     async searchStaff() {
         const keyword = document.getElementById('staff-search').value.trim();
         const container = document.getElementById('search-results-dropdown');
         if (!keyword) return;
+
         container.style.display = 'block';
         container.innerHTML = '<div class="list-group-item text-center"><span class="spinner-border spinner-border-sm"></span> 搜尋中...</div>';
+
         try {
+            // 現在 userService.searchUsers 已經修復，可以正確搜尋
             const results = await userService.searchUsers(keyword);
             if (results.length === 0) {
                 container.innerHTML = '<div class="list-group-item text-muted text-center">無結果</div>';
                 setTimeout(() => container.style.display = 'none', 1500);
                 return;
             }
+
             container.innerHTML = results.map(u => {
                 const isAdded = this.selectedStaff.some(s => s.uid === u.uid);
                 const uName = this.unitMap[u.unitId] || u.unitName || '未知單位';
+                
                 return `
                     <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center ${isAdded ? 'disabled bg-light' : ''}"
                         onclick="window.routerPage.addStaffFromSearch('${u.uid}', '${u.name}', '${u.rank||''}', '${u.staffId||''}', '${u.group||''}', '${u.unitId}')">
-                        <div><strong>${u.name}</strong> <small class="text-muted">(${u.staffId || ''})</small><br><small class="text-muted">${uName}</small></div>
+                        <div>
+                            <strong>${u.name}</strong> <small class="text-muted">(${u.staffId || ''})</small>
+                            <br><small class="text-muted">${uName}</small>
+                        </div>
                         ${isAdded ? '<span class="badge bg-secondary">已加入</span>' : '<span class="badge bg-primary"><i class="fas fa-plus"></i></span>'}
                     </button>
                 `;
@@ -462,56 +499,80 @@ export class PreScheduleManagePage {
         this.renderStaffList(this.unitData.groups || []);
     }
 
-    async savePreSchedule() {
-        const btn = document.getElementById('btn-save');
-        btn.disabled = true; 
-        const monthStr = document.getElementById('edit-month').value;
-        const [year, month] = monthStr.split('-').map(Number);
-        const groupLimits = {};
-        document.querySelectorAll('.g-min-d').forEach(input => {
-            const g = input.dataset.group;
-            const row = input.closest('tr');
-            groupLimits[g] = {
-                minD: parseInt(row.querySelector('.g-min-d').value)||0, minE: parseInt(row.querySelector('.g-min-e').value)||0, minN: parseInt(row.querySelector('.g-min-n').value)||0,
-                maxE: row.querySelector('.g-max-e').value ? parseInt(row.querySelector('.g-max-e').value) : null,
-                maxN: row.querySelector('.g-max-n').value ? parseInt(row.querySelector('.g-max-n').value) : null
-            };
-        });
-        const staffSettings = {};
-        this.selectedStaff.forEach(s => staffSettings[s.uid] = { group: s.tempGroup });
-        const supportStaffIds = this.selectedStaff.filter(s => s.isSupport).map(s => s.uid);
-        const staffSnapshots = this.selectedStaff.map(s => ({
-            uid: s.uid, name: s.name, rank: s.rank, staffId: s.staffId, unitId: s.unitId, group: s.tempGroup
-        }));
-
-        const data = {
-            unitId: this.targetUnitId, year, month,
-            settings: {
-                openDate: document.getElementById('edit-open').value, closeDate: document.getElementById('edit-close').value,
-                maxOffDays: parseInt(document.getElementById('edit-maxOff').value), maxHoliday: parseInt(document.getElementById('edit-maxHoliday').value),
-                reservedStaff: parseInt(document.getElementById('edit-reserved').value)||0, showOtherNames: document.getElementById('edit-showNames').checked,
-                shiftTypesLimit: parseInt(document.getElementById('edit-shiftTypes').value), allowThreeTypesVoluntary: document.getElementById('edit-allow3').checked,
-                groupLimits: groupLimits
-            },
-            staffIds: this.selectedStaff.map(s => s.uid), staffSettings: staffSettings, supportStaffIds: supportStaffIds,
-            staffSnapshots: staffSnapshots, status: 'open'
-        };
-
-        try {
-            if (this.isEditMode) { await PreScheduleService.updatePreScheduleSettings(this.editingScheduleId, data); }
-            else {
-                const exists = await PreScheduleService.checkPreScheduleExists(this.targetUnitId, year, month);
-                if (exists) throw new Error("該月份預班表已存在！");
-                await PreScheduleService.createPreSchedule(data);
-            }
-            alert("✅ 儲存成功"); this.modal.hide(); this.loadList(this.targetUnitId);
-        } catch (e) { alert("失敗: " + e.message); } finally { btn.disabled = false; }
-    }
-
     // ... (其餘 importLastMonthSettings, setDefaultDates, handleTypeLimitChange, deletePreSchedule, goToEdit 保持不變)
     async importLastMonthSettings() { /*...*/ }
     setDefaultDates() { /*...*/ }
     handleTypeLimitChange(val) { /*...*/ }
     async deletePreSchedule(id) { if(confirm("確定刪除？")){await PreScheduleService.deletePreSchedule(id); this.loadList(this.targetUnitId);} }
     goToEdit(id) { window.location.hash = `/pre-schedule/edit?id=${id}`; }
+
+    // ✅ 修正：savePreSchedule 需儲存快照
+    async savePreSchedule() {
+        const btn = document.getElementById('btn-save');
+        btn.disabled = true; 
+        
+        const monthStr = document.getElementById('edit-month').value;
+        const [year, month] = monthStr.split('-').map(Number);
+
+        const groupLimits = {};
+        document.querySelectorAll('.g-min-d').forEach(input => {
+            const g = input.dataset.group;
+            const row = input.closest('tr');
+            groupLimits[g] = {
+                minD: parseInt(row.querySelector('.g-min-d').value) || 0,
+                minE: parseInt(row.querySelector('.g-min-e').value) || 0,
+                minN: parseInt(row.querySelector('.g-min-n').value) || 0,
+                maxE: row.querySelector('.g-max-e').value ? parseInt(row.querySelector('.g-max-e').value) : null,
+                maxN: row.querySelector('.g-max-n').value ? parseInt(row.querySelector('.g-max-n').value) : null
+            };
+        });
+
+        const staffSettings = {};
+        this.selectedStaff.forEach(s => staffSettings[s.uid] = { group: s.tempGroup });
+
+        const supportStaffIds = this.selectedStaff.filter(s => s.isSupport).map(s => s.uid);
+
+        // ✅ 建立 Snapshot
+        const staffSnapshots = this.selectedStaff.map(s => ({
+            uid: s.uid, name: s.name, rank: s.rank, staffId: s.staffId, unitId: s.unitId, group: s.tempGroup
+        }));
+
+        const data = {
+            unitId: this.targetUnitId,
+            year, month,
+            settings: {
+                openDate: document.getElementById('edit-open').value,
+                closeDate: document.getElementById('edit-close').value,
+                maxOffDays: parseInt(document.getElementById('edit-maxOff').value),
+                maxHoliday: parseInt(document.getElementById('edit-maxHoliday').value),
+                reservedStaff: parseInt(document.getElementById('edit-reserved').value) || 0,
+                showOtherNames: document.getElementById('edit-showNames').checked,
+                shiftTypesLimit: parseInt(document.getElementById('edit-shiftTypes').value),
+                allowThreeTypesVoluntary: document.getElementById('edit-allow3').checked,
+                groupLimits: groupLimits
+            },
+            staffIds: this.selectedStaff.map(s => s.uid),
+            staffSettings: staffSettings,
+            supportStaffIds: supportStaffIds,
+            staffSnapshots: staffSnapshots, // 儲存快照
+            status: 'open'
+        };
+
+        try {
+            if (this.isEditMode) {
+                await PreScheduleService.updatePreScheduleSettings(this.editingScheduleId, data);
+            } else {
+                const exists = await PreScheduleService.checkPreScheduleExists(this.targetUnitId, year, month);
+                if (exists) throw new Error("該月份預班表已存在！");
+                await PreScheduleService.createPreSchedule(data);
+            }
+            alert("✅ 儲存成功");
+            this.modal.hide();
+            this.loadList(this.targetUnitId);
+        } catch (e) {
+            alert("失敗: " + e.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
 }
