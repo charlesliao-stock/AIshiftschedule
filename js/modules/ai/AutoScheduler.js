@@ -7,7 +7,7 @@ import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrate
 
 const MAX_RUNTIME = 30000;
 
-export class ImprovedAutoScheduler {
+export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
         console.log(`🚀 改良版 AI 排班啟動: 策略 ${strategyCode}`);
@@ -86,7 +86,7 @@ export class ImprovedAutoScheduler {
             if (consecutive >= maxCons) {
                 context.assignments[uid][day] = 'OFF';
                 context.stats[uid].OFF++;
-                context.logs.push(`Day ${day}: ${staff.name} 連${consecutive}天 → 強制休假`);
+                // context.logs.push(`Day ${day}: ${staff.name} 連${consecutive}天 → 強制休假`);
                 return;
             }
 
@@ -117,7 +117,11 @@ export class ImprovedAutoScheduler {
         // 依缺口大小排序（缺最多的優先填）
         shiftNeeds.sort((a, b) => b.gap - a.gap);
 
-        context.staffList.forEach(staff => {
+        // 隨機打亂員工順序，避免總是同一個人先補
+        const shuffledStaff = [...context.staffList];
+        this.shuffleArray(shuffledStaff);
+
+        shuffledStaff.forEach(staff => {
             const uid = staff.uid;
             
             // 跳過已排班 & 鎖定
@@ -141,7 +145,7 @@ export class ImprovedAutoScheduler {
                 context.stats[uid][shift]++;
                 need.gap--;
                 
-                context.logs.push(`Day ${day}: ${staff.name} 補缺 ${shift} (剩餘缺 ${need.gap})`);
+                // context.logs.push(`Day ${day}: ${staff.name} 補缺 ${shift}`);
                 break;
             }
         });
@@ -159,29 +163,37 @@ export class ImprovedAutoScheduler {
         overStaffed.forEach(item => {
             let toRemove = item.excess;
             
-            for (const staff of context.staffList) {
+            // 找出當天排該班別的人
+            const candidates = context.staffList.filter(s => 
+                context.assignments[s.uid][day] === item.shift && 
+                !this.isPreScheduleLocked(s.uid, day, context)
+            );
+
+            // 排序：休假越少的人越優先被移除 (讓他休假)
+            candidates.sort((a, b) => {
+                const offA = this.countOffDays(a.uid, day, context);
+                const offB = this.countOffDays(b.uid, day, context);
+                return offA - offB; 
+            });
+
+            for (const staff of candidates) {
                 if (toRemove <= 0) break;
                 
                 const uid = staff.uid;
-                const currentShift = context.assignments[uid][day];
                 
-                if (currentShift !== item.shift) continue;
-                
-                // 🔒 不移除預班鎖定
-                if (this.isPreScheduleLocked(uid, day, context)) continue;
-
                 // 🎯 公平性評估：優先移除「休假較少」的人
                 const offCount = this.countOffDays(uid, day, context);
                 const expectedOff = this.calculateExpectedOff(day, context);
                 
                 // 若此人休假天數 < 應休天數 → 優先改為 OFF
-                if (offCount < expectedOff) {
+                // 或者如果真的超編太多，也得移除
+                if (offCount < expectedOff || toRemove > 0) {
                     context.assignments[uid][day] = 'OFF';
-                    context.stats[uid][currentShift]--;
+                    context.stats[uid][item.shift]--;
                     context.stats[uid].OFF++;
                     toRemove--;
                     
-                    context.logs.push(`Day ${day}: ${staff.name} ${item.shift}→OFF (削減超編，公平調整)`);
+                    // context.logs.push(`Day ${day}: ${staff.name} ${item.shift}→OFF (削減超編)`);
                 }
             }
         });
@@ -229,7 +241,7 @@ export class ImprovedAutoScheduler {
                 context.stats[item.uid][item.currentShift]--;
                 context.stats[item.uid].OFF++;
                 
-                context.logs.push(`Day ${day}: ${item.staff.name} 公平調整 ${item.currentShift}→OFF (差${item.diff.toFixed(1)}天)`);
+                // context.logs.push(`Day ${day}: ${item.staff.name} 公平調整 ${item.currentShift}→OFF`);
             }
         }
     }
@@ -243,23 +255,16 @@ export class ImprovedAutoScheduler {
 
         context.staffList.forEach(staff => {
             const uid = staff.uid;
-            const actualOff = this.countOffDays(uid, upToDay + 1, context); // +1 因為已排到當天
+            const actualOff = this.countOffDays(uid, upToDay + 1, context); 
             const diff = expectedOff - actualOff;
             
             staffOffStats.push({ uid, staff, actualOff, diff });
         });
 
-        // 找出休假過多和過少的人
         const tooMany = staffOffStats.filter(s => s.diff < -1).sort((a, b) => a.diff - b.diff);
         const tooFew = staffOffStats.filter(s => s.diff > 1).sort((a, b) => b.diff - a.diff);
 
-        context.logs.push(`📊 Week ${Math.ceil(upToDay / 7)} 公平性檢查: 休過多 ${tooMany.length}人, 休過少 ${tooFew.length}人`);
-
-        // 🔄 嘗試在後續 3 天內進行補償（不回溯已排班）
-        for (let d = upToDay + 1; d <= Math.min(upToDay + 3, context.daysInMonth); d++) {
-            // 給予休假不足者更高的 OFF 優先級（在 Phase 3/4 會用到）
-            // 此處僅記錄，實際調整在各 Phase 中進行
-        }
+        // context.logs.push(`📊 Week ${Math.ceil(upToDay / 7)} 公平性檢查: 休過多 ${tooMany.length}人, 休過少 ${tooFew.length}人`);
     }
 
     // ========================================
@@ -358,7 +363,7 @@ export class ImprovedAutoScheduler {
             tempAssign,
             day,
             context.shiftDefs,
-            { constraints: { minInterval11h: true } },
+            { constraints: { minInterval11h: true } }, 
             staff.constraints,
             context.assignments[uid][0] || 'OFF',
             context.lastMonthConsecutive[uid] || 0
@@ -367,8 +372,15 @@ export class ImprovedAutoScheduler {
         return !result.errors[day];
     }
 
+    static shuffleArray(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+    }
+
     // ========================================
-    //  Context 準備（與原版相同）
+    //  Context 準備
     // ========================================
     static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode) {
         const assignments = {};
