@@ -2,25 +2,25 @@
 
 const WEIGHTS = {
     NEED_MET: 0,          
-    NEED_MISSING: 1000,   // 基礎缺人分
-    OVER_STAFFED: -20000, // 嚴重超編
+    NEED_MISSING: 2000,   // 🔥 提高：缺人時上班是最高優先
+    OVER_STAFFED: -20000, // 嚴重超編禁止
     
-    PREF_P1: 1000,       
-    PREF_P2: 600,        
+    PREF_P1: 800,         
+    PREF_P2: 500,        
     PREF_NO: -9999,       
     
     CONTINUITY_BONUS: 50, 
     PATTERN_PENALTY: -50,
     TWO_DAY_BLOCK_BONUS: 200,
 
-    // 基礎公平分 (會隨天數加倍)
-    FAIRNESS_BASE: 2000 
+    // 公平性：每差一天放假的修正力道
+    FAIRNESS_BASE: 1500   
 };
 
-// 輔助：計算該員目前已放假天數 (包含 Day 0 以前不算，只算本月)
+// 輔助：嚴格計算「本月 1 號起」的 OFF 數量
 const getCurrentOffDays = (uid, context, currentDay) => {
     let offCount = 0;
-    // 遍歷本月已排的每一天
+    // 遍歷本月已排的每一天 (從 1 號開始)
     for (let d = 1; d < currentDay; d++) {
         const s = context.assignments[uid][d];
         if (s === 'OFF' || s === 'M_OFF') offCount++;
@@ -28,31 +28,50 @@ const getCurrentOffDays = (uid, context, currentDay) => {
     return offCount;
 };
 
-// 🔥 核心：公平性分數計算 (適用於所有策略)
+// 🔥 公平性分數計算
 const calculateFairnessScore = (uid, day, context) => {
-    // 1. 計算「累積至今天，理應放幾天假」
-    // 公式：(全月標準放假 / 全月天數) * 目前天數
+    // 1. 理應放假天數 (累積)
     const totalIdealOff = context.idealOffDays || 8; 
     const progress = day / context.daysInMonth;
     const expectedOffSoFar = totalIdealOff * progress;
 
-    // 2. 計算「實際已放幾天假」
+    // 2. 實際放假天數
     const actualOff = getCurrentOffDays(uid, context, day);
 
-    // 3. 計算差距 (實際 - 應放)
-    // 正值：放太爽了 (欠班) -> 應該加分讓他上班
-    // 負值：太操了 (欠假) -> 應該扣分讓他休息
+    // 3. 差距
     const diff = actualOff - expectedOffSoFar;
-
-    // 4. 每 5 天加重一次權重 (Step Function)
-    // Day 1-4: x1, Day 5-9: x2, Day 10-14: x3 ... Day 25+: x6
+    
+    // 每 5 天加重一次權重 (越月底越嚴格)
     const multiplier = Math.floor(day / 5) + 1;
     
-    // 總分 = 差距 * 基礎分 * 倍率
+    // diff > 0 (假放太多): 應該上班 -> 上班選項加分
+    // diff < 0 (假放太少): 應該休假 -> 上班選項扣分
+    // 注意：這裡是回傳給「上班班別(D/E/N)」的分數
+    // 所以假放太多 (diff正) 要加分，反之扣分
+    // 公式調整： return diff * -1 * WEIGHTS...  (錯的)
+    // 邏輯修正：
+    // 如果我假放多了 (Actual > Expected)，diff 為正。我應該去上班。所以上班分數要 +。
+    // 所以 return -diff * WEIGHTS... (這樣假多 -> 負分 -> 不上班?? 不對)
+    
+    // 正確邏輯：
+    // 對「上班班別」來說：
+    // 假放太少 (Actual < Expected, diff負) -> 應該排 OFF -> 上班分數要扣分 (負上加負)
+    // 假放太多 (Actual > Expected, diff正) -> 應該排 上班 -> 上班分數要加分
+    
+    // 因此： return (Actual - Expected) * -1 * Base?
+    // 讓我們直觀一點：
+    // 缺假 (diff < 0): 希望 OFF。上班分數應為 負。 (diff * PositiveWeight) -> 負
+    // 多假 (diff > 0): 希望 Work。上班分數應為 正。 (diff * PositiveWeight) -> 正
+    
+    // 所以，直接回傳 diff * WEIGHTS 即可？
+    // 例子：應放 5 天，實放 3 天。diff = -2。
+    // 上班分數 += -2 * 1500 = -3000。 (降低上班機率，增加 OFF 機率) -> 正確！
+    // 例子：應放 5 天，實放 7 天。diff = +2。
+    // 上班分數 += +2 * 1500 = +3000。 (增加上班機率) -> 正確！
+
     return diff * WEIGHTS.FAIRNESS_BASE * multiplier;
 };
 
-// 策略 A：數值平衡
 export class BalanceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
@@ -65,12 +84,12 @@ export class BalanceStrategy {
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 2. ✅ 公平性追趕 (針對上班班別)
+        // 2. 公平性追趕 (影響上班意願)
         if (shift !== 'OFF') {
             score += calculateFairnessScore(uid, day, context);
         }
 
-        // 3. 基礎偏好
+        // 3. 偏好
         const prefs = context.preferences[uid] || {};
         if (prefs.p1 === shift) score += 100;
 
@@ -78,7 +97,6 @@ export class BalanceStrategy {
     }
 }
 
-// 策略 B：願望優先
 export class PreferenceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
@@ -96,17 +114,15 @@ export class PreferenceStrategy {
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 3. ✅ 公平性追趕 (即便是願望優先，也不能放假放太多)
+        // 3. 公平性 (即使願望優先，也要微調)
         if (shift !== 'OFF') {
-            // 係數稍微調低一點點，保留願望的優先權
-            score += calculateFairnessScore(uid, day, context) * 0.8;
+            score += calculateFairnessScore(uid, day, context) * 0.8; 
         }
 
         return score;
     }
 }
 
-// 策略 C：規律作息
 export class PatternStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
@@ -130,7 +146,7 @@ export class PatternStrategy {
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 3. ✅ 公平性追趕
+        // 3. 公平性
         if (shift !== 'OFF') {
             score += calculateFairnessScore(uid, day, context);
         }
