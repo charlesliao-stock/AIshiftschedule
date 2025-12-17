@@ -1,12 +1,28 @@
 // js/ai/AIStrategies.js
 
-// 基礎權重
-const BASE_WEIGHTS = {
-    NEED_HIGH: 50,
-    NEED_LOW: 10,
-    PREFERENCE: 20,
-    CONTINUITY: 10,
-    FATIGUE: -80
+// 權重常數定義
+const WEIGHTS = {
+    // 滿足人力需求
+    NEED_MET: 0,          // 剛好滿足
+    NEED_MISSING: 500,    // 缺人 (極高分，鼓勵填入)
+    OVER_STAFFED: -10000, // ⛔️ 超編 (極大扣分，除非無人可排，否則不填)
+    
+    // 員工偏好
+    PREF_P1: 2000,        // 第一志願 (拉高權重)
+    PREF_P2: 800,         // 第二志願
+    PREF_NO: -5000,       // 填了「勿排」卻硬排 (極大扣分)
+    
+    // 平衡性
+    BALANCE_OVER_AVG: -200, // 超過平均班數
+    
+    // 連續性
+    CONTINUITY_BONUS: 50, // 連續上班 (減少換班)
+    PATTERN_PENALTY: -50  // 花花班 (D->E->D)
+};
+
+// 輔助：計算該員目前的總班數 (用於平衡)
+const getCurrentTotalShifts = (uid, stats) => {
+    return (stats[uid]?.D || 0) + (stats[uid]?.E || 0) + (stats[uid]?.N || 0);
 };
 
 // 策略 A：數值平衡 (Statistical Balance)
@@ -15,21 +31,30 @@ export class BalanceStrategy {
         let score = 100;
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
+        const myStats = context.stats[uid] || {};
 
-        // 1. 人力需求 (最高優先級)
+        // 1. 人力需求控制 (最優先)
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += BASE_WEIGHTS.NEED_HIGH; // 缺人趕快補
-            else score -= 50; // 滿了就扣分
+            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
+            else score += WEIGHTS.OVER_STAFFED; // ⛔️ 關鍵修正：人夠了就別再排
         }
 
-        // 2. 平均分配 (削峰填谷)
-        // 檢查該員目前累計的該班別數，若已超過平均值則扣分
-        if (shift === 'N' || shift === 'E') {
-            const myCount = context.stats[uid]?.[shift] || 0;
-            // 假設平均值是 5，若已排 6 個，大幅扣分
-            const avg = 5; // 實務上應由 context 動態計算 Lane Average
-            if (myCount > avg) score -= (myCount - avg) * 20;
+        // 2. 削峰填谷 (平衡班數)
+        // 計算目前所有人平均班數
+        let totalAll = 0;
+        Object.values(context.stats).forEach(s => totalAll += (s.D+s.E+s.N));
+        const avg = totalAll / context.staffList.length;
+        const myTotal = getCurrentTotalShifts(uid, context.stats);
+
+        if (shift !== 'OFF' && myTotal > avg + 1) {
+            score += WEIGHTS.BALANCE_OVER_AVG; // 班太多了，扣分
+        } else if (shift !== 'OFF' && myTotal < avg - 1) {
+            score += 200; // 班太少，加分
         }
+
+        // 3. 基礎偏好 (即使是平衡版，也要稍微顧及)
+        const prefs = context.preferences[uid] || {};
+        if (prefs.p1 === shift) score += 100;
 
         return score;
     }
@@ -39,18 +64,18 @@ export class BalanceStrategy {
 export class PreferenceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
-        const prefs = context.preferences[uid];
+        const prefs = context.preferences[uid] || {};
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 1. 滿足願望 (權重極高)
-        if (prefs.p1 === shift) score += 500;
-        else if (prefs.p2 === shift) score += 300;
+        // 1. 滿足願望 (絕對優先)
+        if (prefs.p1 === shift) score += WEIGHTS.PREF_P1;
+        else if (prefs.p2 === shift) score += WEIGHTS.PREF_P2;
 
-        // 2. 人力需求 (次要，允許微幅溢出)
+        // 2. 人力需求
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += BASE_WEIGHTS.NEED_HIGH;
-            // 這裡不強烈扣分滿員，允許為了滿足願望而稍微多排人
+            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
+            else score += WEIGHTS.OVER_STAFFED; // 即使是願望優先，也不能嚴重超編
         }
 
         return score;
@@ -65,18 +90,20 @@ export class PatternStrategy {
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 1. 連續性 (最高優先級)
+        // 1. 連續性獎勵
         if (shift === prev && shift !== 'OFF') {
-            score += 200; // 強烈鼓勵連班 (DD, EE, NN)
+            score += WEIGHTS.CONTINUITY_BONUS;
         }
-
-        // 2. 避免花花班
+        // 懲罰頻繁換班 (花花班)
         if (shift !== prev && prev !== 'OFF' && shift !== 'OFF') {
-            score -= 50; // 懲罰換班 (如 D->E)
+            score += WEIGHTS.PATTERN_PENALTY;
         }
 
-        // 3. 人力需求
-        if (shift !== 'OFF' && current < shiftReq) score += BASE_WEIGHTS.NEED_HIGH;
+        // 2. 人力需求
+        if (shift !== 'OFF') {
+            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
+            else score += WEIGHTS.OVER_STAFFED;
+        }
 
         return score;
     }
