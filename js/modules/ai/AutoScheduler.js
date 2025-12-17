@@ -1,28 +1,32 @@
 import { RuleEngine } from "./RuleEngine.js";
 import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
 
-const MAX_RUNTIME = 60000; // 延長至 60秒 以容納回溯
+const MAX_RUNTIME = 60000;
 
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode}`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (三階段啟發式)`);
         const startTime = Date.now();
 
         try {
+            // 1. 策略選擇
             let StrategyEngine = BalanceStrategy;
             if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
             if (strategyCode === 'C') StrategyEngine = PatternStrategy;
 
+            // 2. 準備環境
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
             context.StrategyEngine = StrategyEngine;
 
-            // 開始排班 (從 Day 1, 第一個人開始)
-            const success = await this.solveDay(1, context);
+            // 3. 逐日排班 (Day 1 -> End)
+            for (let d = 1; d <= context.daysInMonth; d++) {
+                if (Date.now() - startTime > MAX_RUNTIME) throw new Error("運算超時");
+                await this.solveDayProcedure(d, context);
+            }
 
             const duration = (Date.now() - startTime) / 1000;
-            const status = success ? `成功 (${duration}s)` : "超時/部分完成";
-            context.logs.push(`策略 ${strategyCode} ${status}`);
+            context.logs.push(`策略 ${strategyCode} 完成 (${duration}s)`);
 
             return { assignments: context.assignments, logs: context.logs };
 
@@ -32,6 +36,7 @@ export class AutoScheduler {
         }
     }
 
+    // 準備上下文資料 (包含計算總量標準、初始化統計)
     static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode) {
         const assignments = {};
         const preferences = {};
@@ -46,11 +51,13 @@ export class AutoScheduler {
         
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
-        // 1. 計算每日放假上限 & 全月標準
+        // 計算全月標準
         const daysInMonth = new Date(currentSchedule.year, currentSchedule.month, 0).getDate();
         const staffCount = staffList.length;
         let totalWorkSlotsNeeded = 0;
-        const dailyMaxOff = {}; 
+        
+        // 每日需求快取
+        const dailyReq = {};
 
         for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(currentSchedule.year, currentSchedule.month - 1, d);
@@ -58,15 +65,11 @@ export class AutoScheduler {
             const reqD = parseInt(staffReq.D?.[w] || 0);
             const reqE = parseInt(staffReq.E?.[w] || 0);
             const reqN = parseInt(staffReq.N?.[w] || 0);
-            const dailyTotalReq = reqD + reqE + reqN;
-            totalWorkSlotsNeeded += dailyTotalReq;
-            
-            // 🔥 每日放假上限 = 總人數 - 需上班人數
-            let maxOff = staffCount - dailyTotalReq;
-            if (maxOff < 0) maxOff = 0;
-            dailyMaxOff[d] = maxOff;
+            dailyReq[d] = { D: reqD, E: reqE, N: reqN };
+            totalWorkSlotsNeeded += (reqD + reqE + reqN);
         }
 
+        // 計算平均應放假天數
         let idealOffDays = 0;
         if (staffCount > 0) {
             const totalCapacity = daysInMonth * staffCount;
@@ -74,12 +77,10 @@ export class AutoScheduler {
         }
         if (idealOffDays < 0) idealOffDays = 0;
 
-        // 初始化人員資料
         staffList.forEach(s => {
             const uid = s.uid || s.id;
             assignments[uid] = {};
-            
-            // ✅ 新增 currentOff 用於即時追蹤
+            // currentOff 用於即時追蹤放假數
             stats[uid] = { D:0, E:0, N:0, OFF:0, currentOff: 0 };
             
             // 歷史回溯
@@ -100,13 +101,13 @@ export class AutoScheduler {
             }
             lastMonthConsecutive[uid] = cons;
 
-            // 設定連續上限
+            // 連續上班上限
             let myMaxConsecutive = globalMax;
             if (allowLongLeave && s.isLongLeave) myMaxConsecutive = 7;
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // 白名單邏輯
+            // 白名單
             const staticFixed = s.constraints?.allowFixedShift ? s.constraints.fixedShiftConfig : null;
             const sub = preScheduleData.submissions?.[uid] || {};
             const pref = sub.preferences || {};
@@ -129,13 +130,11 @@ export class AutoScheduler {
             if (!allowed.includes('OFF')) allowed.push('OFF');
             whitelists[uid] = allowed;
             
-            // 填入預班 (保留 Wish)
+            // 預班填入 (直接視為已排定)
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     const val = (w === 'M_OFF' ? 'OFF' : w);
                     assignments[uid][d] = val;
-                    // 若是預班休假，預先計入 currentOff (注意：solveRecursive 會再檢查一次，這裡僅做初始化)
-                    // 但因為 assignments 是全域的，solveRecursive 會讀到它
                 });
             }
 
@@ -154,160 +153,205 @@ export class AutoScheduler {
             lastMonthConsecutive,
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq,
+            dailyReq, // 每日需求表
             logs: [],
-            startTime: Date.now(),
-            idealOffDays,
-            dailyMaxOff
+            idealOffDays
         };
     }
 
-    static async solveDay(day, context) {
-        if (Date.now() - context.startTime > MAX_RUNTIME) return false;
-        if (day > context.daysInMonth) return true;
+    // 🔥 核心：單日排班程序 (取代遞迴)
+    static async solveDayProcedure(day, context) {
+        // Step 0: 鎖定預班 (預班已經在 prepareContext 填入，這裡只需確認不被覆蓋)
+        // 我們將針對「尚未排班 (undefined)」的人進行操作
 
-        // 找出「還沒排班」的人 (預班已經填在 context.assignments 了)
-        // 但為了支援回溯，我們需要對所有人都跑一次檢查（若是預班則跳過）
-        const pending = context.staffList; // 所有人都進入遞迴鏈
-        
-        // 每日隨機排序，確保公平性
-        // 注意：這裡不能 filter 掉已排班的人，因為需要對照順序
-        // 但為了效率，我們可以把「已鎖定預班」的人放到隊列最後面或最前面處理
-        // 這裡簡單起見，隨機打亂即可，solveRecursive 內部會檢查鎖定
-        this.shuffleArray(pending);
+        // Step 1: 延續性優先 (Continuity)
+        // 由上往下，先找前一天有上班者，填入與前一天一樣的班
+        this.applyContinuityPhase(day, context);
 
-        const success = await this.solveRecursive(day, pending, 0, context);
-        
-        // 無論當天結果如何，推進到下一天 (因為有 backtracking，這裡 return true 代表這一天解完)
-        if (success) {
-            return await this.solveDay(day + 1, context);
-        } else {
-            // 這一整天都無解 (極少發生，除非總人力 < 總需求)
-            console.warn(`Day ${day} 無法完全滿足需求，保留部分空缺`);
-            return await this.solveDay(day + 1, context);
-        }
+        // Step 2: 填補缺口 (Fill Gaps)
+        // 檢查缺班，從白名單中找人填入
+        this.fillUnderstaffedPhase(day, context);
+
+        // Step 3: 修剪多餘 (Trim Excess)
+        // 檢查多排的班，加入 OFF 公平性策略，調整為 OFF
+        this.trimOverstaffedPhase(day, context);
+
+        // Step 4: 收尾 (Finalize)
+        // 剩下沒排到的人，全部填 OFF
+        this.finalizeDayPhase(day, context);
     }
 
-    // ✅ 增加 backtracks 參數限制回溯次數
-    static async solveRecursive(day, list, idx, context, backtracks = { count: 0 }) {
-        // 1. 終止條件：當天所有人都排完了
-        if (idx >= list.length) return true;
-        
-        const MAX_BACKTRACKS = 2000; // 限制回溯次數
-        if (backtracks.count > MAX_BACKTRACKS) return false; // 放棄治療，接受當前解
-
-        const staff = list[idx];
-        const uid = staff.uid;
-
-        // ✅ 4. 預班鎖定檢查 (Guarantee Pre-schedule)
-        // 如果這個格子已經有值 (來自預班)，且我們設定要保障它
-        // 注意：這裡假設 assignments 在 prepareContext 已經填入了預班
-        if (context.assignments[uid][day]) {
-            // 檢查是否違反硬性規則 (例如連7)，如果違反，這裡可能需要報錯或強制覆蓋
-            // 但依據需求 "保障預班"，我們假設預班是老大，直接跳過
-            
-            // 需同步更新 stats (因為 prepareContext 只初始化了 0)
-            const preShift = context.assignments[uid][day];
-            if (preShift === 'OFF' || preShift === 'M_OFF') context.stats[uid].currentOff++;
-            else context.stats[uid][preShift] = (context.stats[uid][preShift] || 0) + 1;
-
-            if (await this.solveRecursive(day, list, idx + 1, context, backtracks)) return true;
-            
-            // 回溯時復原
-            if (preShift === 'OFF' || preShift === 'M_OFF') context.stats[uid].currentOff--;
-            else context.stats[uid][preShift]--;
-            
-            return false; // 預班這條路不通，回退
-        }
-
-        // --- 動態檢查與候選生成 ---
-        
-        // 連續上班檢查
-        let consecutive = 0;
-        for (let d = day - 1; d >= 1; d--) {
-            const s = context.assignments[uid][d];
-            if (s && s !== 'OFF' && s !== 'M_OFF') consecutive++;
-            else break;
-        }
-        if (consecutive === day - 1) consecutive += context.lastMonthConsecutive[uid];
-        const maxCons = staff.constraints.calculatedMaxConsecutive;
-
-        // 統計當天目前狀況
+    // 階段 1: 延續性排班
+    static applyContinuityPhase(day, context) {
         const w = new Date(context.year, context.month - 1, day).getDay();
-        const currentCounts = { D:0, E:0, N:0, OFF:0 };
-        context.staffList.forEach(s => {
-            const sh = context.assignments[s.uid][day];
-            if (sh) {
-                if (sh === 'M_OFF') currentCounts['OFF']++;
-                else currentCounts[sh] = (currentCounts[sh]||0) + 1;
+
+        context.staffList.forEach(staff => {
+            const uid = staff.uid;
+            // 若已有預班，跳過
+            if (context.assignments[uid][day]) return;
+
+            // 檢查前一天
+            let prevShift = context.assignments[uid][day - 1];
+            if (!prevShift) prevShift = 'OFF'; // 防呆
+
+            // 條件：前一天是上班 (D/E/N)，且非 M_OFF
+            const isPrevWorking = prevShift !== 'OFF' && prevShift !== 'M_OFF';
+            
+            if (isPrevWorking) {
+                // 嘗試排入「相同班別」
+                const targetShift = prevShift;
+
+                // 檢查 1: 白名單是否允許
+                if (!context.whitelists[uid].includes(targetShift)) return;
+
+                // 檢查 2: 合法性 (連7檢查、間隔檢查)
+                // 這裡暫時填入，讓 RuleEngine 檢查
+                context.assignments[uid][day] = targetShift; 
+                
+                const valid = RuleEngine.validateStaff(
+                    context.assignments[uid], day, context.shiftDefs, 
+                    { constraints: { minInterval11h: true } }, 
+                    staff.constraints, context.assignments[uid][0], context.lastMonthConsecutive[uid]
+                );
+
+                if (valid.errors[day]) {
+                    // 若違規 (例如連7)，則撤銷，留給後面處理 (通常會變成 OFF)
+                    delete context.assignments[uid][day];
+                } else {
+                    // 若合法，保留此排班，並更新暫時統計
+                    context.stats[uid][targetShift] = (context.stats[uid][targetShift] || 0) + 1;
+                }
+            }
+            // 若前一天是 OFF，跳過 (留給 Step 2 填補)
+        });
+    }
+
+    // 階段 2: 填補缺口
+    static fillUnderstaffedPhase(day, context) {
+        const req = context.dailyReq[day]; // { D:4, E:3, N:2 }
+        const w = new Date(context.year, context.month - 1, day).getDay();
+
+        ['N', 'E', 'D'].forEach(shiftType => { // 順序可調整，通常 N/E 較難排優先處理
+            let currentCount = 0;
+            // 計算目前已排人數
+            context.staffList.forEach(s => {
+                if (context.assignments[s.uid][day] === shiftType) currentCount++;
+            });
+
+            // 若缺人
+            while (currentCount < req[shiftType]) {
+                // 找出所有「尚未排班」且「白名單有此班」的候選人
+                let candidates = context.staffList
+                    .filter(s => !context.assignments[s.uid][day]) // 尚未排班
+                    .filter(s => context.whitelists[s.uid].includes(shiftType)) // 白名單有
+                    .map(s => {
+                        // 計算分數 (主要看公平性 & 偏好)
+                        const score = context.StrategyEngine.calculateScore(s.uid, shiftType, day, context, {}, w);
+                        return { staff: s, score };
+                    })
+                    .sort((a, b) => b.score - a.score); // 分數高者優先
+
+                // 嘗試填入
+                let filled = false;
+                for (let cand of candidates) {
+                    const uid = cand.staff.uid;
+                    
+                    // 試填
+                    context.assignments[uid][day] = shiftType;
+                    
+                    // 驗證規則
+                    const valid = RuleEngine.validateStaff(
+                        context.assignments[uid], day, context.shiftDefs, 
+                        { constraints: { minInterval11h: true } }, 
+                        cand.staff.constraints, context.assignments[uid][0], context.lastMonthConsecutive[uid]
+                    );
+
+                    if (!valid.errors[day]) {
+                        // 合法，確認填入
+                        context.stats[uid][shiftType] = (context.stats[uid][shiftType] || 0) + 1;
+                        currentCount++;
+                        filled = true;
+                        break; // 換下一個缺額
+                    } else {
+                        // 違規，撤銷
+                        delete context.assignments[uid][day];
+                    }
+                }
+
+                // 若完全找不到人填補 (所有人都有困難)，則跳出 (保留缺額)
+                if (!filled) break;
             }
         });
-
-        // 🔥 1. 每日放假上限檢查 (Hard Cap)
-        const maxOffAllowed = context.dailyMaxOff[day];
-        const currentOffCount = currentCounts['OFF'];
-        const isOffFull = currentOffCount >= maxOffAllowed;
-
-        let candidates = [];
-
-        // 情境 A: 必須休假 (連6)
-        if (consecutive >= maxCons) {
-            // 即使 OFF 滿了，法規最大，還是得休
-            candidates = [{ shift: 'OFF', score: 99999 }];
-        } 
-        // 情境 B: 正常排班
-        else {
-            candidates = context.whitelists[uid].map(shift => {
-                // ✅ 硬性禁止：若 OFF 滿了，且不是必須休假，直接踢除 OFF 選項
-                if (shift === 'OFF' && isOffFull) {
-                    return null; // 標記刪除
-                }
-                return {
-                    shift,
-                    score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w)
-                };
-            })
-            .filter(item => item !== null) // 過濾掉被踢除的 OFF
-            .sort((a, b) => b.score - a.score);
-        }
-
-        // --- 嘗試填入 ---
-        for (const item of candidates) {
-            const shift = item.shift;
-            
-            // 執行填入
-            context.assignments[uid][day] = shift;
-            
-            // ✅ 即時更新 stats (包含 currentOff)
-            if (shift === 'OFF') context.stats[uid].currentOff++;
-            else context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
-
-            const valid = RuleEngine.validateStaff(
-                context.assignments[uid], day, context.shiftDefs, 
-                { constraints: { minInterval11h: true } }, 
-                staff.constraints, context.assignments[uid][0], context.lastMonthConsecutive[uid]
-            );
-
-            if (!valid.errors[day]) {
-                if (await this.solveRecursive(day, list, idx + 1, context, backtracks)) return true;
-            }
-
-            // ❌ 回溯 (Backtrack)
-            backtracks.count++;
-            if (shift === 'OFF') context.stats[uid].currentOff--;
-            else context.stats[uid][shift]--;
-            
-            delete context.assignments[uid][day];
-        }
-
-        // ✅ 3. 若所有選項都失敗 (死路) -> 回傳 false 觸發上一層回溯
-        // 不再強制填 OFF，除非是遞迴頂層 (solveDay 會處理殘局)
-        return false;
     }
 
-    static shuffleArray(arr) {
-        for (let i = arr.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [arr[i], arr[j]] = [arr[j], arr[i]];
-        }
+    // 階段 3: 修剪多餘 (加入 OFF 公平性)
+    static trimOverstaffedPhase(day, context) {
+        const req = context.dailyReq[day];
+        const w = new Date(context.year, context.month - 1, day).getDay();
+
+        ['D', 'E', 'N'].forEach(shiftType => {
+            // 找出當天排該班別的人
+            let assignedStaff = context.staffList.filter(s => context.assignments[s.uid][day] === shiftType);
+            let currentCount = assignedStaff.length;
+
+            // 若多排了
+            if (currentCount > req[shiftType]) {
+                // 排序：找出「最應該放假」的人
+                // 使用 calculateScore 算 'OFF' 的分數，分數高代表他很缺假
+                // 或者是算 '上班' 的分數，分數低代表他不該上班
+                
+                let candidates = assignedStaff.map(s => {
+                    // 這裡我們計算「改排 OFF」的效益分數
+                    // 預班鎖定者不能動
+                    const isLocked = preScheduleData.submissions?.[s.uid]?.wishes?.[day];
+                    if (isLocked) return { staff: s, score: -99999 }; // 鎖定者不參與修剪
+
+                    const score = context.StrategyEngine.calculateScore(s.uid, 'OFF', day, context, {}, w);
+                    return { staff: s, score };
+                }).sort((a, b) => b.score - a.score); // 分數高 (最需要OFF) 者排前面
+
+                // 開始修剪
+                for (let cand of candidates) {
+                    if (currentCount <= req[shiftType]) break; // 修剪完畢
+                    if (cand.score === -99999) continue; // 鎖定者跳過
+
+                    const uid = cand.staff.uid;
+                    // 將其改為 OFF
+                    // 需先扣掉原本的統計
+                    context.stats[uid][shiftType]--;
+                    
+                    context.assignments[uid][day] = 'OFF';
+                    context.stats[uid].currentOff++; // 增加休假計數
+                    
+                    currentCount--;
+                }
+            }
+        });
+    }
+
+    // 階段 4: 收尾
+    static finalizeDayPhase(day, context) {
+        context.staffList.forEach(s => {
+            if (!context.assignments[s.uid][day]) {
+                context.assignments[s.uid][day] = 'OFF';
+                context.stats[s.uid].currentOff++;
+            } else {
+                // 確保 stats 同步 (如果是 Step 1 填入的，currentOff 還沒加)
+                const val = context.assignments[s.uid][day];
+                if (val === 'OFF' || val === 'M_OFF') {
+                    // 避免重複加 (Step 3 可能加過了) - 簡單解法是重算 stats，或這裡不動作
+                    // 因為 Step 1 不會填 OFF，Step 2 填上班，Step 3 填 OFF 有加
+                    // 只有「完全沒排到」的人在這裡填 OFF，需要加
+                }
+            }
+        });
+        
+        // 為了確保 stats 正確，重新掃描一次當天 (防呆)
+        context.staffList.forEach(s => {
+            const val = context.assignments[s.uid][day];
+            if (val === 'OFF' || val === 'M_OFF') {
+                // 這裡不需動作，stats 在賦值時維護較好
+            }
+        });
     }
 }
