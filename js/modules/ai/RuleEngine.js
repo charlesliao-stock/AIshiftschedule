@@ -2,24 +2,26 @@ export class RuleEngine {
 
     /**
      * 驗證單一員工
+     * @param {Object} staffConstraints 包含 calculatedMaxConsecutive, maxConsecutiveNights
      */
     static validateStaff(assignments, daysInMonth, shiftDefs, rules, staffConstraints = {}, lastMonthLastShift = 'OFF', lastMonthConsecutive = 0, checkUpToDay = null) {
         const errors = {};
         const safeAssignments = assignments || {};
         const limitDay = checkUpToDay || daysInMonth;
 
-        // 1. 連續上班上限：優先使用 AutoScheduler 計算過的 calculatedMaxConsecutive (已包含長假邏輯)
-        // 若無，則使用人員設定，最後才用全域設定
+        // 1. 連續上班上限 (Spec 1 & 4)
+        // 優先順序: AutoScheduler 計算值(含長假) > 人員設定 > 單位設定 > 預設6
         const maxConsecutive = staffConstraints.calculatedMaxConsecutive || staffConstraints.maxConsecutive || rules.maxConsecutiveWork || 6;
         
-        // 2. 連續夜班上限：優先使用人員設定 (同仁同意連夜)
+        // 2. 連續夜班上限 (Spec 2)
+        // 若人員同意連夜(設定在 staffConstraints)，則使用該值；否則使用單位設定
         const maxNight = staffConstraints.maxConsecutiveNights || rules.constraints?.maxConsecutiveNight || 4;
 
         const isProtected = !!staffConstraints.isPregnant || !!staffConstraints.isPostpartum;
         const minIntervalMins = (rules.constraints?.minInterval11h !== false) ? 660 : 0; 
 
         let consecutiveDays = lastMonthConsecutive;
-        let consecutiveNights = (lastMonthLastShift === 'N') ? 1 : 0; // 簡易推算，理想應由外部傳入精確值
+        let consecutiveNights = (lastMonthLastShift === 'N') ? 1 : 0; 
         let prevShift = lastMonthLastShift;
 
         // 建立時間查詢表
@@ -46,7 +48,7 @@ export class RuleEngine {
                 errors[d] = `連${consecutiveDays} (上限${maxConsecutive})`;
             }
 
-            // B. 連續夜班檢查
+            // B. 連續夜班檢查 (含人員意願)
             if (shift === 'N') consecutiveNights++; else consecutiveNights = 0;
             if (consecutiveNights > maxNight) {
                 errors[d] = `連夜${consecutiveNights} (上限${maxNight})`;
