@@ -17,7 +17,8 @@ export class AutoScheduler {
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
             context.StrategyEngine = StrategyEngine;
 
-            this.prefillFixedShifts(context);
+            // ⚠️ 修正：不再呼叫 prefillFixedShifts 進行強制填滿
+            // 讓 solveDay 逐日決定，才能觸發「連6休1」的檢查
 
             const success = await this.solveDay(1, context);
 
@@ -77,8 +78,7 @@ export class AutoScheduler {
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // 2. 靜態白名單 (Static Whitelist)
-            // 這裡產生的是「整個月可能排的班」，每日動態限制會在 solveRecursive 處理
+            // 2. 白名單邏輯
             const staticFixed = s.constraints?.allowFixedShift ? s.constraints.fixedShiftConfig : null;
             const staticLane = s.constraints?.rotatingLane || 'DN';
             
@@ -93,7 +93,7 @@ export class AutoScheduler {
             if (s.constraints?.isPregnant || s.constraints?.isSpecialStatus) {
                 allowed = ['D', 'OFF'];
             }
-            // (B) 包班
+            // (B) 包班 (鎖定班別，但此處不強制填滿，交由 solver 決定何時休假)
             else if (monthlyBatch === 'N') allowed = ['N', 'OFF'];
             else if (monthlyBatch === 'E') allowed = ['E', 'OFF'];
             else if (!monthlyBatch && staticFixed === 'N') allowed = ['N', 'OFF'];
@@ -101,9 +101,8 @@ export class AutoScheduler {
             // (C) 一般人員
             else {
                 if (staticLane === 'DE') allowed = ['D', 'E', 'OFF'];
-                else allowed = ['D', 'N', 'OFF']; // 預設 DN
+                else allowed = ['D', 'N', 'OFF']; 
 
-                // 若選擇混和3種，或偏好中有填寫非預設組別的班，則全開
                 if (monthlyMix === '3') {
                     allowed = ['D', 'E', 'N', 'OFF'];
                 } else {
@@ -111,15 +110,14 @@ export class AutoScheduler {
                     if (wishes.includes('E') && !allowed.includes('E')) allowed.push('E');
                     if (wishes.includes('N') && !allowed.includes('N')) allowed.push('N');
                     if (wishes.includes('D') && !allowed.includes('D')) allowed.push('D');
-                    
-                    // 確保至少包含 D, E, N, OFF (依據您的要求: 預設全開)
+                    // 預設全開，避免無班可排
                     if (allowed.length < 4) allowed = ['D', 'E', 'N', 'OFF'];
                 }
             }
             
             whitelists[uid] = allowed;
             
-            // 3. 填入預班
+            // 3. 填入預班 (User Wishes) - 這是使用者自己填的，予以保留
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
@@ -150,25 +148,16 @@ export class AutoScheduler {
         };
     }
 
-    static prefillFixedShifts(context) {
-        Object.entries(context.whitelists).forEach(([uid, allowed]) => {
-            const workingShift = allowed.find(s => s !== 'OFF');
-            if (allowed.length === 2 && workingShift) {
-                for (let d = 1; d <= context.daysInMonth; d++) {
-                    if (!context.assignments[uid][d]) {
-                        context.assignments[uid][d] = workingShift;
-                        context.stats[uid][workingShift]++;
-                    }
-                }
-            }
-        });
-    }
+    // ⚠️ 移除 prefillFixedShifts 方法，避免邏輯干擾
 
     static async solveDay(day, context) {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
         if (day > context.daysInMonth) return true;
+
+        // 隨機排序，確保公平性
         const pending = context.staffList.filter(s => !context.assignments[s.uid][day]);
         this.shuffleArray(pending);
+
         const success = await this.solveRecursive(day, pending, 0, context);
         return await this.solveDay(day + 1, context);
     }
@@ -180,8 +169,7 @@ export class AutoScheduler {
         const uid = staff.uid;
         const w = new Date(context.year, context.month - 1, day).getDay();
         
-        // --- 1. 動態白名單檢查 (Dynamic Whitelist Check) ---
-        // 檢查是否已連續上班達上限
+        // --- 關鍵修正：動態檢查連續上班天數 ---
         let consecutive = 0;
         // 往前追溯
         for (let d = day - 1; d >= 1; d--) {
@@ -189,7 +177,6 @@ export class AutoScheduler {
             if (s && s !== 'OFF' && s !== 'M_OFF') consecutive++;
             else break;
         }
-        // 若追溯到1號仍是上班，加上上月累積
         if (consecutive === day - 1) {
             consecutive += context.lastMonthConsecutive[uid];
         }
@@ -197,11 +184,11 @@ export class AutoScheduler {
         const maxCons = staff.constraints.calculatedMaxConsecutive;
         let candidates = [];
 
-        // ✅ 若已達上限，當日白名單僅剩 ['OFF']
+        // 🔥 紅線規則：若已連上 6 天，當天強制只能排 OFF
         if (consecutive >= maxCons) {
-            candidates = [{ shift: 'OFF', score: 100 }]; 
+            candidates = [{ shift: 'OFF', score: 9999 }]; 
         } else {
-            // 否則，依照正常流程計算白名單候選分數
+            // 正常評分
             const currentCounts = {};
             context.staffList.forEach(s => {
                 const sh = context.assignments[s.uid][day];
@@ -214,14 +201,13 @@ export class AutoScheduler {
             })).sort((a, b) => b.score - a.score);
         }
 
-        // --- 2. 嘗試填入候選班別 ---
+        // 嘗試填入
         for (const item of candidates) {
             const shift = item.shift;
             
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
-            // 呼叫 RuleEngine 進行最終確認 (包含間隔檢查)
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], 
                 day, 
@@ -241,7 +227,7 @@ export class AutoScheduler {
             delete context.assignments[uid][day];
         }
 
-        // 若無合法解，填入 OFF 防止當機 (理論上上面已有 OFF 選項)
+        // 無解時填 OFF 防止當機 (但通常上面會有 OFF 選項)
         context.assignments[uid][day] = 'OFF';
         return true;
     }
