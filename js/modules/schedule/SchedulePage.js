@@ -17,7 +17,7 @@ export class SchedulePage {
             sortKey: 'staffId', // 預設依職編排序
             sortAsc: true,
             unitMap: {},
-            preSchedule: null // 暫存預班表資料 (用於讀取備註與偏好)
+            preSchedule: null
         };
         this.versionsModal = null; 
         this.scoreModal = null;
@@ -53,6 +53,8 @@ export class SchedulePage {
                 .shift-cell { cursor: pointer; transition: background 0.1s; }
                 .shift-cell:hover { background-color: #e9ecef; }
                 .sort-icon { font-size: 0.7rem; margin-left: 2px; color: #666; }
+                /* 統計列樣式 */
+                .stats-row td { background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #666 !important; }
             </style>
         `;
 
@@ -63,7 +65,6 @@ export class SchedulePage {
 
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
 
-        // 設定 Modal HTML
         const modalHtml = `
             <div class="modal fade" id="settings-modal" tabindex="-1">
                 <div class="modal-dialog modal-lg">
@@ -200,7 +201,6 @@ export class SchedulePage {
         if (this.state.activeMenu) { this.state.activeMenu.remove(); this.state.activeMenu = null; }
     }
     
-    // 核心資料載入：同步預班表人員名單
     async loadData() {
         const container = document.getElementById('schedule-grid-container');
         const loading = document.getElementById('loading-indicator');
@@ -209,7 +209,7 @@ export class SchedulePage {
         try {
             // 先載入預班表 (為了取得正確的人員名單)
             const preSchedule = await PreScheduleService.getPreSchedule(this.state.currentUnitId, this.state.year, this.state.month);
-            this.state.preSchedule = preSchedule; // 暫存以供 render 使用
+            this.state.preSchedule = preSchedule; 
 
             // 決定人員名單：Snapshot (最優先) > StaffIds (次之) > UnitStaff (最後)
             let staffList = [];
@@ -230,7 +230,7 @@ export class SchedulePage {
             ]);
 
             this.state.unitSettings = unit;
-            this.state.staffList = staffList; // 使用同步後的人員名單
+            this.state.staffList = staffList;
             this.state.daysInMonth = new Date(this.state.year, this.state.month, 0).getDate();
             
             this.state.unitMap = {};
@@ -311,7 +311,6 @@ export class SchedulePage {
         const assignments = scheduleData.assignments || {};
         const prevAssignments = scheduleData.prevAssignments || {};
 
-        // 排序邏輯
         staffList.sort((a, b) => {
             let valA = '', valB = '';
             if (sortKey === 'staffId') {
@@ -334,15 +333,10 @@ export class SchedulePage {
             return `${staff.name}<span class="text-danger small ms-1">(${uName})</span>`;
         };
 
-        // 整合備註：排班備註 + 偏好
         const getNoteContent = (staff) => {
             let parts = [];
             const sub = preSchedule?.submissions?.[staff.uid];
-            
-            // 1. 排班備註
             if (sub?.notes) parts.push(sub.notes);
-            
-            // 2. 偏好 (包班、順位)
             if (sub?.preferences) {
                 const p = sub.preferences;
                 let prefStr = '';
@@ -353,12 +347,46 @@ export class SchedulePage {
                 if (ranks.length > 0) prefStr += ranks.join('>');
                 if (prefStr) parts.push(prefStr);
             }
-            
-            // 3. 人員基本備註 (若有)
             if (staff.note) parts.push(staff.note);
-
             return parts.join(' | ');
         };
+
+        // 計算每日統計 (Daily Stats)
+        const dailyStats = [];
+        const reqMatrix = this.state.unitSettings?.staffRequirements || { D:[], E:[], N:[] };
+        
+        for (let d = 1; d <= daysInMonth; d++) {
+            const date = new Date(year, month - 1, d);
+            const w = date.getDay(); // 0=Sun, 1=Mon...
+            
+            let counts = { D:0, E:0, N:0, OFF:0 };
+            staffList.forEach(s => {
+                const shift = assignments[s.uid]?.[d];
+                if (shift && counts[shift] !== undefined) counts[shift]++;
+                else if (shift === 'M_OFF') counts['OFF']++;
+            });
+
+            // 檢查是否符合需求 (陣列索引 0=Sun, 1=Mon...)
+            // 注意: getDay() 回傳 0 是週日，若 reqMatrix 也是 [日, 一...] 則直接用
+            // 若 reqMatrix 是 [一, 二... 日]，則需轉換。假設 UI 是 [一...日]
+            // 通常 DB 存法: index 0 = Monday, 6 = Sunday 或是 0 = Sunday
+            // 這裡假設 unitSettings.staffRequirements 依照 JS getDay() 標準 (0=Sun)
+            
+            const reqD = reqMatrix.D?.[w] || 0;
+            const reqE = reqMatrix.E?.[w] || 0;
+            const reqN = reqMatrix.N?.[w] || 0;
+
+            dailyStats[d] = {
+                counts,
+                html: `
+                    <div style="font-size:0.6rem; line-height:1.1;">
+                        <span class="${counts.D < reqD ? 'text-danger fw-bold' : (counts.D > reqD ? 'text-warning' : '')}">D:${counts.D}/${reqD}</span><br>
+                        <span class="${counts.E < reqE ? 'text-danger fw-bold' : (counts.E > reqE ? 'text-warning' : '')}">E:${counts.E}/${reqE}</span><br>
+                        <span class="${counts.N < reqN ? 'text-danger fw-bold' : (counts.N > reqN ? 'text-warning' : '')}">N:${counts.N}/${reqN}</span>
+                    </div>
+                `
+            };
+        }
 
         let html = `
             <div class="schedule-table-wrapper shadow-sm bg-white rounded">
@@ -373,7 +401,6 @@ export class SchedulePage {
                             </th>
                             <th class="sticky-col third-col bg-light">備註</th>
         `;
-        
         const prevMonthLastDate = new Date(year, month - 1, 0); 
         const prevLastDayVal = prevMonthLastDate.getDate();
         const prevDaysToShow = [];
@@ -422,6 +449,20 @@ export class SchedulePage {
                 </tr>
             `;
         });
+
+        // 統計列 (Footer)
+        html += `
+            <tr class="stats-row">
+                <td class="sticky-col first-col">統計</td>
+                <td class="sticky-col second-col">每日人力</td>
+                <td class="sticky-col third-col"></td>
+        `;
+        prevDaysToShow.forEach(() => html += `<td></td>`);
+        for (let d = 1; d <= daysInMonth; d++) {
+            html += `<td class="p-1">${dailyStats[d].html}</td>`;
+        }
+        html += `<td colspan="4"></td></tr>`;
+
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
