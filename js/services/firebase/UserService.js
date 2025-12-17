@@ -6,22 +6,21 @@ import {
 import { createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 export const userService = {
-    // 取得所有使用者
+    // 取得所有使用者 (全院)
     async getAllUsers() {
         try {
             const q = query(collection(db, "users"));
             const snapshot = await getDocs(q);
             return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
-        } catch (error) { console.error(error); throw error; }
+        } catch (error) { console.error("Get All Users Error:", error); throw error; }
     },
 
-    // 取得特定單位人員
     async getUsersByUnit(unitId) {
         try {
             const q = query(collection(db, "users"), where("unitId", "==", unitId));
             const snapshot = await getDocs(q);
             return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
-        } catch (error) { console.error(error); throw error; }
+        } catch (error) { console.error("Get Users By Unit Error:", error); throw error; }
     },
 
     async getUserData(uid) {
@@ -30,38 +29,28 @@ export const userService = {
             const docRef = doc(db, "users", uid);
             const docSnap = await getDoc(docRef);
             return docSnap.exists() ? { uid: docSnap.id, ...docSnap.data() } : null;
-        } catch (error) { console.error(error); throw error; }
+        } catch (error) { console.error("Get User Data Error:", error); throw error; }
     },
 
+    async updateLastLogin(uid) {
+        try {
+            if (!db) return;
+            await updateDoc(doc(db, "users", uid), { lastLogin: serverTimestamp() });
+        } catch (e) {}
+    },
+    
     async createStaff(data, password) {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, data.email, password);
             const uid = userCredential.user.uid;
-            
-            // 預設 constraints 結構
-            const constraints = {
-                maxConsecutive: 6,
-                isPregnant: false,
-                allowFixedShift: false, // 預設不開放包班
-                rotatingLane: 'DN'      // 預設跑 白+大 組別
-            };
-
-            await setDoc(doc(db, "users", uid), {
-                ...data,
-                constraints: { ...constraints, ...data.constraints },
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            });
+            await setDoc(doc(db, "users", uid), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
             return { success: true, uid: uid };
         } catch (error) { return { success: false, error: error.message }; }
     },
 
     async updateUser(uid, data) {
         try {
-            await updateDoc(doc(db, "users", uid), {
-                ...data,
-                updatedAt: serverTimestamp()
-            });
+            await updateDoc(doc(db, "users", uid), { ...data, updatedAt: serverTimestamp() });
             return { success: true };
         } catch (error) { console.error(error); throw error; }
     },
@@ -76,11 +65,14 @@ export const userService = {
     async getUnitStaff(unitId) { return this.getUsersByUnit(unitId); },
     async getAllStaffCount() { const list = await this.getAllUsers(); return list.length; },
     
-    // 用於更新最後登入時間等
-    async updateLastLogin(uid) {
-        try {
-            const userRef = doc(db, "users", uid);
-            await updateDoc(userRef, { lastLogin: serverTimestamp() });
-        } catch (e) {}
+    // ✅ 關鍵修復：搜尋功能
+    async searchUsers(keyword) {
+        const list = await this.getAllUsers();
+        if (!keyword) return [];
+        const k = keyword.toLowerCase();
+        return list.filter(u => 
+            (u.name && u.name.toLowerCase().includes(k)) || 
+            (u.staffId && String(u.staffId).toLowerCase().includes(k)) // 強制轉型 String 避免數字報錯
+        );
     }
 };
