@@ -10,16 +10,16 @@ export class AutoScheduler {
         const startTime = Date.now();
 
         try {
+            // 策略選擇
             let StrategyEngine = BalanceStrategy;
             if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
             if (strategyCode === 'C') StrategyEngine = PatternStrategy;
 
+            // 準備 Context
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
             context.StrategyEngine = StrategyEngine;
 
-            // 預填固定班 (Optional)
-            // this.prefillFixedShifts(context);
-
+            // 執行排班
             const success = await this.solveDay(1, context);
 
             const duration = (Date.now() - startTime) / 1000;
@@ -48,42 +48,49 @@ export class AutoScheduler {
         
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
-        // ✅ 新增：計算整個月的「總人力需求」與「每人平均應上數」
-        let totalSlotsNeeded = 0;
+        // --- 1. 計算全月標準放假天數 (Ideal Off Days) ---
         const daysInMonth = new Date(currentSchedule.year, currentSchedule.month, 0).getDate();
+        const staffCount = staffList.length;
+        let totalWorkSlotsNeeded = 0;
         
         for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(currentSchedule.year, currentSchedule.month - 1, d);
             const w = date.getDay(); // 0=Sun
-            // 累加每天早/小/大的需求人數
             const reqD = parseInt(staffReq.D?.[w] || 0);
             const reqE = parseInt(staffReq.E?.[w] || 0);
             const reqN = parseInt(staffReq.N?.[w] || 0);
-            totalSlotsNeeded += (reqD + reqE + reqN);
+            totalWorkSlotsNeeded += (reqD + reqE + reqN);
         }
 
-        // 計算平均值 (Ideal Shifts)
-        // 例如 300 班 / 10 人 = 30 班/人
-        const idealShifts = staffList.length > 0 ? (totalSlotsNeeded / staffList.length) : 0;
+        // 公式：(總人日 - 總工作需求) / 人數 = 平均每人應放假天數
+        // 例如：(30天 * 10人 - 200個班) / 10人 = 100個休假 / 10人 = 10天休假/人
+        let idealOffDays = 0;
+        if (staffCount > 0) {
+            const totalCapacity = daysInMonth * staffCount;
+            const totalOffNeeded = totalCapacity - totalWorkSlotsNeeded;
+            idealOffDays = totalOffNeeded / staffCount;
+        }
+        // 防呆：如果算出負數或異常，給個預設值 (例如月休8天)
+        if (idealOffDays < 0) idealOffDays = 8;
+
+        console.log(`📊 本月計算：總需求 ${totalWorkSlotsNeeded} 班，平均每人應放假 ${idealOffDays.toFixed(1)} 天`);
 
         staffList.forEach(s => {
             const uid = s.uid || s.id;
             assignments[uid] = {};
             stats[uid] = { D:0, E:0, N:0, OFF:0 };
             
-            // 1. 歷史回溯
+            // 歷史回溯
             const userHistory = historyAssignments[uid] || {};
             const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a);
             
             let lastDayShift = 'OFF';
-            
             if (days.length > 0) assignments[uid][0] = userHistory[days[0]] || 'OFF';
             else assignments[uid][0] = 'OFF';
             
             if (days.length > 1) assignments[uid][-1] = userHistory[days[1]] || 'OFF';
             else assignments[uid][-1] = 'OFF';
 
-            // 計算上月底連續
             let cons = 0;
             for (let d of days) {
                 const shift = userHistory[d];
@@ -98,7 +105,7 @@ export class AutoScheduler {
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // 2. 白名單 (Strict Preference Mode)
+            // 白名單 (Strict Preference Mode)
             const staticFixed = s.constraints?.allowFixedShift ? s.constraints.fixedShiftConfig : null;
             const sub = preScheduleData.submissions?.[uid] || {};
             const pref = sub.preferences || {};
@@ -119,17 +126,14 @@ export class AutoScheduler {
                 if (pref.priority2) wishes.add(pref.priority2);
                 if (pref.priority3) wishes.add(pref.priority3);
 
-                if (wishes.size > 0) {
-                    allowed = Array.from(wishes);
-                } else {
-                    allowed = ['D', 'E', 'N'];
-                }
+                if (wishes.size > 0) allowed = Array.from(wishes);
+                else allowed = ['D', 'E', 'N'];
             }
             
             if (!allowed.includes('OFF')) allowed.push('OFF');
             whitelists[uid] = allowed;
             
-            // 3. 預班
+            // 填入預班
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
@@ -157,7 +161,7 @@ export class AutoScheduler {
             staffReq,
             logs: [],
             startTime: Date.now(),
-            idealShifts: idealShifts // ✅ 將平均標準傳入 Context
+            idealOffDays // ✅ 存入 Context
         };
     }
 
@@ -177,18 +181,15 @@ export class AutoScheduler {
         
         const staff = list[idx];
         const uid = staff.uid;
-        const w = new Date(context.year, context.month - 1, day).getDay();
         
-        // 1. 連續上班紅線
+        // 動態檢查連續上班
         let consecutive = 0;
         for (let d = day - 1; d >= 1; d--) {
             const s = context.assignments[uid][d];
             if (s && s !== 'OFF' && s !== 'M_OFF') consecutive++;
             else break;
         }
-        if (consecutive === day - 1) {
-            consecutive += context.lastMonthConsecutive[uid];
-        }
+        if (consecutive === day - 1) consecutive += context.lastMonthConsecutive[uid];
 
         const maxCons = staff.constraints.calculatedMaxConsecutive;
         let candidates = [];
@@ -196,6 +197,7 @@ export class AutoScheduler {
         if (consecutive >= maxCons) {
             candidates = [{ shift: 'OFF', score: 99999 }]; 
         } else {
+            const w = new Date(context.year, context.month - 1, day).getDay();
             const currentCounts = {};
             context.staffList.forEach(s => {
                 const sh = context.assignments[s.uid][day];
