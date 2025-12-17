@@ -17,8 +17,7 @@ export class AutoScheduler {
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
             context.StrategyEngine = StrategyEngine;
 
-            // ⚠️ 修正：不再呼叫 prefillFixedShifts 進行強制填滿
-            // 讓 solveDay 逐日決定，才能觸發「連6休1」的檢查
+            this.prefillFixedShifts(context);
 
             const success = await this.solveDay(1, context);
 
@@ -53,32 +52,42 @@ export class AutoScheduler {
             assignments[uid] = {};
             stats[uid] = { D:0, E:0, N:0, OFF:0 };
             
-            // 1. 歷史回溯
+            // --- 1. 歷史回溯 (強化版) ---
             const userHistory = historyAssignments[uid] || {};
+            // 排序日期：大 -> 小 (例如 31, 30, 29...)
             const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a);
             
-            let lastDayShift = 'OFF';
-            let cons = 0;
-
+            // 填入 Day 0 (上月最後一天)
             if (days.length > 0) {
-                const lastDayKey = days[0];
-                lastDayShift = userHistory[lastDayKey] || 'OFF';
+                assignments[uid][0] = userHistory[days[0]] || 'OFF';
+            } else {
+                assignments[uid][0] = 'OFF';
+            }
+
+            // 填入 Day -1 (上月倒數第二天)，供 PatternStrategy 判斷連2
+            if (days.length > 1) {
+                assignments[uid][-1] = userHistory[days[1]] || 'OFF';
+            } else {
+                assignments[uid][-1] = 'OFF';
+            }
+
+            // 計算連續天數 (保持不變)
+            let cons = 0;
+            if (days.length > 0) {
                 for (let d of days) {
                     const shift = userHistory[d];
                     if (shift && shift !== 'OFF' && shift !== 'M_OFF') cons++;
                     else break;
                 }
             }
-            
             lastMonthConsecutive[uid] = cons;
-            assignments[uid][0] = lastDayShift;
 
             let myMaxConsecutive = globalMax;
             if (allowLongLeave && s.isLongLeave) myMaxConsecutive = 7;
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // 2. 白名單邏輯
+            // --- 2. 白名單 (Strict Whitelist) ---
             const staticFixed = s.constraints?.allowFixedShift ? s.constraints.fixedShiftConfig : null;
             const staticLane = s.constraints?.rotatingLane || 'DN';
             
@@ -89,19 +98,16 @@ export class AutoScheduler {
 
             let allowed = []; 
 
-            // (A) 特殊身分
             if (s.constraints?.isPregnant || s.constraints?.isSpecialStatus) {
                 allowed = ['D', 'OFF'];
             }
-            // (B) 包班 (鎖定班別，但此處不強制填滿，交由 solver 決定何時休假)
             else if (monthlyBatch === 'N') allowed = ['N', 'OFF'];
             else if (monthlyBatch === 'E') allowed = ['E', 'OFF'];
             else if (!monthlyBatch && staticFixed === 'N') allowed = ['N', 'OFF'];
             else if (!monthlyBatch && staticFixed === 'E') allowed = ['E', 'OFF'];
-            // (C) 一般人員
             else {
                 if (staticLane === 'DE') allowed = ['D', 'E', 'OFF'];
-                else allowed = ['D', 'N', 'OFF']; 
+                else allowed = ['D', 'N', 'OFF'];
 
                 if (monthlyMix === '3') {
                     allowed = ['D', 'E', 'N', 'OFF'];
@@ -110,14 +116,13 @@ export class AutoScheduler {
                     if (wishes.includes('E') && !allowed.includes('E')) allowed.push('E');
                     if (wishes.includes('N') && !allowed.includes('N')) allowed.push('N');
                     if (wishes.includes('D') && !allowed.includes('D')) allowed.push('D');
-                    // 預設全開，避免無班可排
                     if (allowed.length < 4) allowed = ['D', 'E', 'N', 'OFF'];
                 }
             }
             
             whitelists[uid] = allowed;
             
-            // 3. 填入預班 (User Wishes) - 這是使用者自己填的，予以保留
+            // 3. 填入預班
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
@@ -148,16 +153,25 @@ export class AutoScheduler {
         };
     }
 
-    // ⚠️ 移除 prefillFixedShifts 方法，避免邏輯干擾
+    static prefillFixedShifts(context) {
+        Object.entries(context.whitelists).forEach(([uid, allowed]) => {
+            const workingShift = allowed.find(s => s !== 'OFF');
+            if (allowed.length === 2 && workingShift) {
+                for (let d = 1; d <= context.daysInMonth; d++) {
+                    if (!context.assignments[uid][d]) {
+                        context.assignments[uid][d] = workingShift;
+                        context.stats[uid][workingShift]++;
+                    }
+                }
+            }
+        });
+    }
 
     static async solveDay(day, context) {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
         if (day > context.daysInMonth) return true;
-
-        // 隨機排序，確保公平性
         const pending = context.staffList.filter(s => !context.assignments[s.uid][day]);
         this.shuffleArray(pending);
-
         const success = await this.solveRecursive(day, pending, 0, context);
         return await this.solveDay(day + 1, context);
     }
@@ -169,9 +183,8 @@ export class AutoScheduler {
         const uid = staff.uid;
         const w = new Date(context.year, context.month - 1, day).getDay();
         
-        // --- 關鍵修正：動態檢查連續上班天數 ---
+        // 動態檢查連續上班
         let consecutive = 0;
-        // 往前追溯
         for (let d = day - 1; d >= 1; d--) {
             const s = context.assignments[uid][d];
             if (s && s !== 'OFF' && s !== 'M_OFF') consecutive++;
@@ -184,11 +197,9 @@ export class AutoScheduler {
         const maxCons = staff.constraints.calculatedMaxConsecutive;
         let candidates = [];
 
-        // 🔥 紅線規則：若已連上 6 天，當天強制只能排 OFF
         if (consecutive >= maxCons) {
             candidates = [{ shift: 'OFF', score: 9999 }]; 
         } else {
-            // 正常評分
             const currentCounts = {};
             context.staffList.forEach(s => {
                 const sh = context.assignments[s.uid][day];
@@ -201,7 +212,6 @@ export class AutoScheduler {
             })).sort((a, b) => b.score - a.score);
         }
 
-        // 嘗試填入
         for (const item of candidates) {
             const shift = item.shift;
             
@@ -222,12 +232,10 @@ export class AutoScheduler {
                 if (await this.solveRecursive(day, list, idx + 1, context)) return true;
             }
 
-            // 回溯
             context.stats[uid][shift]--;
             delete context.assignments[uid][day];
         }
 
-        // 無解時填 OFF 防止當機 (但通常上面會有 OFF 選項)
         context.assignments[uid][day] = 'OFF';
         return true;
     }
