@@ -133,21 +133,50 @@ export class PreScheduleEditPage {
         await this.loadData();
     }
 
-    // ... (loadData, ensureHistoryData, renderTable, renderShiftBadge, getWeekName, updateStatusBadge, handleCellClick, applyShift 保持不變，為節省篇幅省略) ...
+    // ✅ 重大修正：優先讀取 Snapshot，解決人員不同步與跨單位問題
     async loadData() {
         try {
             this.scheduleData = await PreScheduleService.getPreScheduleById(this.scheduleId);
             if (!this.scheduleData) throw new Error("找不到預班表資料");
+            
             this.unitData = await UnitService.getUnitById(this.scheduleData.unitId);
-            const staff = await userService.getUnitStaff(this.scheduleData.unitId);
-            this.staffList = staff.sort((a, b) => (a.rank || 'Z').localeCompare(b.rank || 'Z'));
+            
+            // 決定使用哪一份人員名單
+            let finalStaffList = [];
+
+            if (this.scheduleData.staffSnapshots && this.scheduleData.staffSnapshots.length > 0) {
+                // 1. 最優先：使用設定檔中儲存的快照 (包含跨單位人員)
+                finalStaffList = this.scheduleData.staffSnapshots;
+            } else if (this.scheduleData.staffIds && this.scheduleData.staffIds.length > 0) {
+                // 2. 次優先：若無快照但有 ID 列表 (舊資料)，則依 ID 抓取最新資料
+                const promises = this.scheduleData.staffIds.map(uid => userService.getUserData(uid));
+                const users = await Promise.all(promises);
+                finalStaffList = users.filter(u => u); // 過濾掉找不到的人
+            } else {
+                // 3. 最後手段：抓取該單位目前所有人員 (不建議，會漏掉支援者)
+                finalStaffList = await userService.getUnitStaff(this.scheduleData.unitId);
+            }
+
+            // 排序 (職級 > 職編)
+            this.staffList = finalStaffList.sort((a, b) => {
+                const rankA = a.rank || 'Z';
+                const rankB = b.rank || 'Z';
+                if (rankA !== rankB) return rankA.localeCompare(rankB);
+                return (a.staffId || '').localeCompare(b.staffId || '');
+            });
+
             document.getElementById('page-title').innerHTML = `<i class="fas fa-edit me-2"></i>${this.unitData.unitName} - ${this.scheduleData.year}/${this.scheduleData.month}`;
             this.updateStatusBadge(this.scheduleData.status);
+            
             await this.ensureHistoryData();
             this.renderTable();
+            
             document.getElementById('btn-save').disabled = false;
             document.getElementById('btn-auto-schedule').disabled = false;
-        } catch (e) { console.error(e); alert("載入失敗: " + e.message); }
+        } catch (e) { 
+            console.error(e); 
+            alert("載入失敗: " + e.message); 
+        }
     }
 
     async ensureHistoryData() {
@@ -160,6 +189,7 @@ export class PreScheduleEditPage {
         this.prevMonthDays = new Date(py, pm, 0).getDate();
         this.historyRange = [];
         for (let i = 5; i >= 0; i--) { this.historyRange.push(this.prevMonthDays - i); }
+        
         if (this.scheduleData.history && Object.keys(this.scheduleData.history).length > 0) {
             this.historyData = this.scheduleData.history;
         } else {
@@ -175,13 +205,17 @@ export class PreScheduleEditPage {
                     });
                 }
                 this.isDirty = true;
-            } catch (e) { this.historyData = {}; this.staffList.forEach(s => this.historyData[s.uid] = {}); }
+            } catch (e) { 
+                this.historyData = {}; 
+                this.staffList.forEach(s => this.historyData[s.uid] = {}); 
+            }
         }
     }
 
     renderTable() {
         const daysInMonth = new Date(this.scheduleData.year, this.scheduleData.month, 0).getDate();
         const submissions = this.scheduleData.submissions || {};
+        
         let html = `
         <table class="table table-bordered table-sm text-center align-middle schedule-table user-select-none">
             <thead class="table-light sticky-top" style="z-index: 5;">
@@ -205,12 +239,20 @@ export class PreScheduleEditPage {
             </thead>
             <tbody>
         `;
+        
         this.staffList.forEach(staff => {
             const uid = staff.uid;
             const sub = submissions[uid] || {};
             const wishes = sub.wishes || {};
             const pref = sub.preferences || {};
             const history = this.historyData[uid] || {};
+            
+            // 處理跨單位顯示
+            let nameDisplay = staff.name;
+            if (staff.unitId && staff.unitId !== this.scheduleData.unitId) {
+                nameDisplay += `<span class="text-danger ms-1" style="font-size:0.7em">(${staff.unitId})</span>`;
+            }
+
             let prefStr = '';
             if (pref.batch) prefStr += `<span class="badge bg-primary me-1" style="font-size:0.7rem; padding:1px 3px;">包${pref.batch}</span>`;
             const p1 = pref.priority1 || '';
@@ -221,10 +263,11 @@ export class PreScheduleEditPage {
             if(p3) pStr += `>${p3}`;
             if (pStr) prefStr += `<span class="text-muted d-block text-truncate" style="font-size:0.75rem">${pStr}</span>`;
             if (!prefStr) prefStr = '<span class="text-muted small">-</span>';
+            
             html += `
                 <tr>
                     <td class="text-muted small col-staff-id">${staff.staffId || ''}</td>
-                    <td class="fw-bold text-start ps-1 col-name" title="${staff.name}">${staff.name}</td>
+                    <td class="fw-bold text-start ps-1 col-name" title="${staff.name}">${nameDisplay}</td>
                     <td class="col-note">${staff.constraints?.isPregnant ? '<span class="badge bg-danger rounded-pill" style="font-size:0.6rem; padding:1px 3px;">孕</span>' : ''}</td>
                     <td onclick="window.routerPage.openPrefModal('${uid}')" class="hover-bg-light col-pref" title="點擊編輯">
                         ${prefStr}
@@ -257,6 +300,7 @@ export class PreScheduleEditPage {
         document.getElementById('schedule-container').innerHTML = html;
     }
 
+    // ... (其餘所有方法 renderShiftBadge, getWeekName, updateStatusBadge, handleCellClick, applyShift, openPrefModal, savePreferences, saveData, goToAutoSchedule 保持不變) ...
     renderShiftBadge(code) {
         if (!code) return '';
         if (code.startsWith('NO_')) return `<span class="badge border border-danger text-danger bg-light" style="padding:1px 2px; font-size:0.7rem;">x${code.replace('NO_', '')}</span>`;
@@ -348,7 +392,6 @@ export class PreScheduleEditPage {
         document.getElementById('btn-save').disabled = false;
     }
 
-    // ✅ 修正重點：使用正確的變數名稱 showMixOption，並在不同意自願3種時隱藏選項
     openPrefModal(uid) {
         this.editingPrefUid = uid;
         const sub = this.scheduleData.submissions[uid] || {};
@@ -358,7 +401,6 @@ export class PreScheduleEditPage {
         const limit = settings.shiftTypesLimit || 2;
         const allow3 = settings.allowThreeTypesVoluntary !== false;
         
-        // 條件：(限制3種) OR (限制2種且允許自願3種)
         const showMixOption = (limit === 3) || (limit === 2 && allow3);
         
         let html = `
@@ -381,7 +423,6 @@ export class PreScheduleEditPage {
                 </select>
             </div>`;
         } else {
-            // 隱藏時預設為 2
             html += `<input type="hidden" id="edit-pref-mix" value="2">`;
         }
 
@@ -406,7 +447,6 @@ export class PreScheduleEditPage {
 
         document.getElementById('pref-dynamic-content').innerHTML = html;
 
-        // 回填值
         document.getElementById('edit-pref-batch').value = pref.batch || '';
         if (showMixOption) {
             document.getElementById('edit-pref-mix').value = pref.monthlyMix || '2';
@@ -415,7 +455,6 @@ export class PreScheduleEditPage {
         document.getElementById('edit-pref-p2').value = pref.priority2 || '';
         document.getElementById('edit-pref-p3').value = pref.priority3 || '';
 
-        // ✅ 修正：使用 showMixOption 變數，修復 ReferenceError
         const toggleP3 = (mixValue) => {
             const p3 = document.getElementById('container-admin-p3');
             if (showMixOption && mixValue === '3') {
