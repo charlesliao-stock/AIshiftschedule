@@ -1,101 +1,111 @@
 import { RuleEngine } from "./RuleEngine.js";
+import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
 import { firebaseService } from "../../services/firebase/FirebaseService.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-const MAX_RUNTIME = 30000; // 30s timeout
+const MAX_RUNTIME = 30000;
 
 export class AutoScheduler {
 
-    /**
-     * 執行排班
-     * @param {string} strategy 'A'(平衡), 'B'(願望), 'C'(規律)
-     */
-    static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategy = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategy}`);
+    static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
-            // 1. 準備 Context (含分組與白名單邏輯)
-            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategy);
-            
-            // 2. 預填包班與預班
+            const db = firebaseService.getDb();
+            // 讀取系統設定 (用於週起始日等)
+            let systemSettings = { weekStartDay: 1 }; 
+            // 實務上可 await getDoc...
+
+            // 1. 選擇策略引擎
+            let StrategyEngine = BalanceStrategy;
+            if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
+            if (strategyCode === 'C') StrategyEngine = PatternStrategy;
+
+            // 2. 準備 Context
+            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
+            context.StrategyEngine = StrategyEngine; // 注入策略
+
+            // 3. 預填 (包班/預班)
             this.prefillFixedShifts(context);
 
-            // 3. 每日步進求解
-            console.log("🔹 開始運算...");
+            // 4. 運算
             const success = await this.solveDay(1, context);
 
-            // 4. 計算最終分數 (包含分組公平性)
-            this.calculateFinalFairness(context);
-
             const duration = (Date.now() - startTime) / 1000;
-            if (success) context.logs.push(`策略 ${strategy} 運算成功 (${duration}s)`);
-            else context.logs.push(`策略 ${strategy} 運算超時或部分完成`);
+            const status = success ? `成功 (${duration}s)` : "超時/部分完成";
+            context.logs.push(`策略 ${strategyCode} ${status}`);
 
             return { assignments: context.assignments, logs: context.logs };
 
         } catch (e) {
-            console.error("排班錯誤:", e);
+            console.error(e);
             return { assignments: {}, logs: [`Error: ${e.message}`] };
         }
     }
 
-    static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategy) {
+    static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode) {
         const assignments = {};
         const preferences = {};
-        const lanes = {}; // 分組：A(包大), B(包小), C(白大), D(白小), S(特殊)
-        const whitelists = {}; // 可用班別
+        const whitelists = {};
+        const stats = {}; // 追蹤每人各班別累計數
 
-        // 初始化
         staffList.forEach(s => {
             const uid = s.uid || s.id;
             assignments[uid] = {};
+            stats[uid] = { D:0, E:0, N:0, OFF:0 };
             
-            // --- Spec 3. 核心邏輯 I：預處理 (白名單與分組) ---
-            let lane = 'C'; // 預設白+大
-            let allowed = ['D', 'N', 'OFF']; // 預設
+            // --- 核心邏輯 I: 白名單預處理 ---
+            // 讀取靜態權限
+            const canFixed = s.constraints?.allowFixedShift; 
+            const lane = s.constraints?.rotatingLane || 'DN'; // DN(白大) 或 DE(白小)
 
-            // 判斷分組與白名單
-            if (s.constraints?.isPregnant || s.constraints?.isSpecialStatus) {
-                lane = 'S'; // 特殊
-                allowed = ['D', 'OFF']; // 只排白
-            } else if (s.constraints?.fixedShiftConfig === 'N' || s.constraints?.batchPref === 'N') {
-                lane = 'A'; // 包大夜
+            // 讀取當月動態選擇 (從 PreSchedule 來的 preferences)
+            const sub = preScheduleData.submissions?.[uid] || {};
+            const monthlyChoice = sub.preferences?.batch; // 'N', 'E', or null
+
+            let allowed = ['D', 'N', 'OFF']; // 預設 C組 (白+大)
+
+            // 1. 特殊身分
+            if (s.constraints?.isPregnant) {
+                allowed = ['D', 'OFF'];
+            }
+            // 2. 包班 (需有權限 + 當月有選)
+            else if (canFixed && monthlyChoice === 'N') {
                 allowed = ['N', 'OFF'];
-            } else if (s.constraints?.fixedShiftConfig === 'E' || s.constraints?.batchPref === 'E') {
-                lane = 'B'; // 包小夜
+            }
+            else if (canFixed && monthlyChoice === 'E') {
                 allowed = ['E', 'OFF'];
-            } else if (s.constraints?.rotatingPattern === 'DE') {
-                lane = 'D'; // 白+小
+            }
+            // 3. 輪班組別
+            else if (lane === 'DE') {
                 allowed = ['D', 'E', 'OFF'];
-            } else {
-                lane = 'C'; // 白+大 (預設)
+            }
+            // 預設 DN
+            else {
                 allowed = ['D', 'N', 'OFF'];
             }
 
-            lanes[uid] = lane;
             whitelists[uid] = allowed;
             
-            // 讀取偏好
-            const sub = preScheduleData.submissions?.[uid] || {};
+            // 填入預班 (鎖定)
+            if (sub.wishes) {
+                Object.entries(sub.wishes).forEach(([d, w]) => {
+                    assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
+                });
+            }
+
             preferences[uid] = {
                 p1: sub.preferences?.priority1,
-                p2: sub.preferences?.priority2,
-                wishes: sub.wishes || {}
+                p2: sub.preferences?.priority2
             };
-            
-            // 填入預班 (Spec 4. 預班保障)
-            Object.entries(sub.wishes || {}).forEach(([d, w]) => {
-                assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
-            });
         });
 
-        // 載入上個月最後一天 (用於連續性檢查)
-        const lastMonthShifts = {};
-        const history = preScheduleData.assignments || {}; // 修正：這裡是 assignments (前個月資料)
+        // 載入上個月最後一天
+        const history = preScheduleData.assignments || {};
         staffList.forEach(s => {
             const uid = s.uid || s.id;
-            // 簡易抓取上個月最後一天，實務上應從 history 解析
-            assignments[uid][0] = 'OFF'; // 預設
+            assignments[uid][0] = 'OFF'; // 簡化，應從 history 讀取
         });
 
         return {
@@ -105,10 +115,9 @@ export class AutoScheduler {
             staffList: staffList.map(s => ({ ...s, uid: s.uid || s.id })),
             assignments,
             preferences,
-            lanes,
             whitelists,
-            strategy,
-            shiftDefs: unitSettings.settings?.shifts || [{code:'D'},{code:'E'},{code:'N'}],
+            stats,
+            shiftDefs: unitSettings.settings?.shifts || [{code:'D', startTime:'08:00', endTime:'16:00'}, {code:'E', startTime:'16:00', endTime:'00:00'}, {code:'N', startTime:'00:00', endTime:'08:00'}],
             staffReq: unitSettings.staffRequirements || {},
             logs: [],
             startTime: Date.now(),
@@ -117,18 +126,15 @@ export class AutoScheduler {
     }
 
     static prefillFixedShifts(context) {
-        // 包班者若沒預休，填入固定班
-        context.staffList.forEach(s => {
-            const uid = s.uid;
-            const lane = context.lanes[uid];
-            let fixShift = null;
-            if (lane === 'A') fixShift = 'N';
-            if (lane === 'B') fixShift = 'E';
-
-            if (fixShift) {
+        // 對於白名單只有 2 種 (Ex: N + OFF) 的人，若沒填 OFF，就填 N
+        Object.entries(context.whitelists).forEach(([uid, allowed]) => {
+            const workingShift = allowed.find(s => s !== 'OFF');
+            // 若白名單只有 [Working, OFF] 兩項，且當天沒被預班鎖定，則填入
+            if (allowed.length === 2 && workingShift) {
                 for (let d = 1; d <= context.daysInMonth; d++) {
                     if (!context.assignments[uid][d]) {
-                        context.assignments[uid][d] = fixShift;
+                        context.assignments[uid][d] = workingShift;
+                        context.stats[uid][workingShift]++;
                     }
                 }
             }
@@ -139,96 +145,67 @@ export class AutoScheduler {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
         if (day > context.daysInMonth) return true;
 
-        // 找出今日未排班人員 (排除已預班/包班)
         const pending = context.staffList.filter(s => !context.assignments[s.uid][day]);
         this.shuffleArray(pending);
 
         const success = await this.solveRecursive(day, pending, 0, context);
-        
-        // 即使當天人力不足也強制推進 (Soft constraint)
         return await this.solveDay(day + 1, context);
     }
 
     static async solveRecursive(day, list, idx, context) {
         if (idx >= list.length) return true;
+        
+        // 簡單的超時保護
+        if (Date.now() - context.startTime > MAX_RUNTIME) return false;
+
         const staff = list[idx];
         const uid = staff.uid;
         
-        // 根據白名單篩選可用班別
-        let candidates = context.whitelists[uid]; 
+        // 根據白名單 + 策略評分
+        const w = new Date(context.year, context.month - 1, day).getDay();
         
-        // 評分與排序
-        const scored = candidates.map(shift => ({
+        // 統計目前當天各班人數
+        const currentCounts = {};
+        context.staffList.forEach(s => {
+            const sh = context.assignments[s.uid][day];
+            if (sh && sh !== 'OFF') currentCounts[sh] = (currentCounts[sh]||0) + 1;
+        });
+
+        // 評分
+        let candidates = context.whitelists[uid].map(shift => ({
             shift,
-            score: this.calculateScore(uid, shift, day, context)
+            score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w)
         })).sort((a, b) => b.score - a.score);
 
-        for (const item of scored) {
+        for (const item of candidates) {
             const shift = item.shift;
             
-            // 暫填
+            // 嘗試填入
             context.assignments[uid][day] = shift;
+            context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
-            // 呼叫 RuleEngine 驗證硬限制
+            // 驗證規則
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], 
-                day, // 只檢查到今天
+                day, 
                 context.shiftDefs, 
-                { constraints: { minInterval11h: true } }, // 簡易規則傳遞
+                { constraints: { minInterval11h: true } }, // 強制啟用間隔檢查
                 staff.constraints,
-                'OFF', 0, day, context.year, context.month
+                context.assignments[uid][0], 0, day
             );
 
             if (!valid.errors[day]) {
                 if (await this.solveRecursive(day, list, idx + 1, context)) return true;
             }
-        }
-        
-        // 回溯：若都無解，填入 OFF (避免卡死)
-        context.assignments[uid][day] = 'OFF'; 
-        return true; 
-    }
 
-    /**
-     * 計算單一班別分數 (Spec 6. 演算法架構)
-     */
-    static calculateScore(uid, shift, day, context) {
-        let score = 100;
-        const strategy = context.strategy;
-        const prefs = context.preferences[uid];
-        const w = new Date(context.year, context.month - 1, day).getDay();
-        const prev = context.assignments[uid][day-1] || 'OFF';
-
-        // 1. 人力需求權重
-        const req = (context.staffReq[shift] && context.staffReq[shift][w]) || 0;
-        // 簡易計算目前人數 (這在遞迴中不準確，僅作啟發式)
-        // 若缺人則加分
-
-        // 2. 策略權重調整
-        if (strategy === 'B') { // 方案 B：願望優先
-            if (prefs.p1 === shift) score += 500; // 極高權重 [cite: 67]
-            if (prefs.p2 === shift) score += 300;
-        } else if (strategy === 'C') { // 方案 C：規律作息
-            if (shift === prev && shift !== 'OFF') score += 200; // 連續班獎勵 [cite: 71]
-            // 若違反樣板 (例如 N->D) 會在 RuleEngine 被擋，這裡只需鼓勵連續
-        } else { // 方案 A：數值平衡 (預設)
-            // 這裡應動態計算 Lane 的標準差，簡化為：平均分配
-            // 若該員本月該班別已多，則降分
-            let count = 0;
-            for(let d=1; d<day; d++) if(context.assignments[uid][d] === shift) count++;
-            score -= (count * 10); // 削峰填谷 [cite: 62]
+            // 回溯
+            context.stats[uid][shift]--;
+            delete context.assignments[uid][day];
         }
 
-        // 3. 基礎偏好 (所有策略通用)
-        if (prefs.p1 === shift) score += 50;
-
-        return score;
-    }
-
-    static calculateFinalFairness(context) {
-        // 這裡可以實作 Spec 5. 分組公平性比較
-        // 計算各 Lane 的變異數並 log 出來
-        context.logs.push("分組公平性計算完成 (Lane Variance checked)");
+        // 若無解，暫填 OFF 以推進 (避免完全卡死)
+        context.assignments[uid][day] = 'OFF';
+        return true;
     }
 
     static shuffleArray(arr) {
