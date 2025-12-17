@@ -22,6 +22,8 @@ export class RuleEngine {
             consecutive += lastMonthConsecutive;
         }
 
+        // 當天若上班導致超過上限，則報錯
+        // 例如 max=6，consecutive=7 -> Error
         if (consecutive > maxConsecutive) {
             errors[day] = `連${consecutive} (上限${maxConsecutive})`;
             return { errors };
