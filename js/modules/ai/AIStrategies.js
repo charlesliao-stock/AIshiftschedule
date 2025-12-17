@@ -2,105 +2,72 @@
 
 const WEIGHTS = {
     NEED_MET: 0,          
-    NEED_MISSING: 2000,   // 提高缺人權重 (確保有人上班)
-    OVER_STAFFED: -20000, // 嚴重超編 (除非包班否則不排)
+    NEED_MISSING: 1000,   // 基礎缺人分
+    OVER_STAFFED: -20000, // 嚴重超編
     
-    PREF_P1: 1000,        // 志願權重
+    PREF_P1: 1000,       
     PREF_P2: 600,        
     PREF_NO: -9999,       
     
     CONTINUITY_BONUS: 50, 
     PATTERN_PENALTY: -50,
-    TWO_DAY_BLOCK_BONUS: 300,
+    TWO_DAY_BLOCK_BONUS: 200,
 
-    // 公平性基礎分數 (會被雙軌權重放大)
-    FAIRNESS_BASE: 5000 
+    // 基礎公平分 (會隨天數加倍)
+    FAIRNESS_BASE: 2000 
 };
 
-// 輔助：計算該員目前的總班數 (長期)
-const getCurrentTotalShifts = (uid, stats) => {
-    return (stats[uid]?.D || 0) + (stats[uid]?.E || 0) + (stats[uid]?.N || 0);
-};
-
-// 輔助：計算全體人員目前的長期平均班數
-const getCohortAverageLong = (context) => {
-    let totalAll = 0;
-    if (context.staffList.length === 0) return 0;
-    context.staffList.forEach(s => {
-        totalAll += getCurrentTotalShifts(s.uid, context.stats);
-    });
-    return totalAll / context.staffList.length;
-};
-
-// 輔助：計算該員過去 N 天的班數 (短期)
-const getShortTermWorkCount = (uid, day, context, n = 3) => {
-    let count = 0;
-    // 檢查 day-1, day-2, ... day-n
-    for (let d = day - 1; d >= day - n; d--) {
-        // AutoScheduler 有準備 day 0 和 day -1 的歷史資料
-        const shift = context.assignments[uid][d];
-        if (shift && shift !== 'OFF' && shift !== 'M_OFF') {
-            count++;
-        }
+// 輔助：計算該員目前已放假天數 (包含 Day 0 以前不算，只算本月)
+const getCurrentOffDays = (uid, context, currentDay) => {
+    let offCount = 0;
+    // 遍歷本月已排的每一天
+    for (let d = 1; d < currentDay; d++) {
+        const s = context.assignments[uid][d];
+        if (s === 'OFF' || s === 'M_OFF') offCount++;
     }
-    return count;
+    return offCount;
 };
 
-// 輔助：計算全體人員的短期平均班數
-const getCohortAverageShort = (day, context, n = 3) => {
-    let total = 0;
-    if (context.staffList.length === 0) return 0;
-    context.staffList.forEach(s => {
-        total += getShortTermWorkCount(s.uid, day, context, n);
-    });
-    return total / context.staffList.length;
+// 🔥 核心：公平性分數計算 (適用於所有策略)
+const calculateFairnessScore = (uid, day, context) => {
+    // 1. 計算「累積至今天，理應放幾天假」
+    // 公式：(全月標準放假 / 全月天數) * 目前天數
+    const totalIdealOff = context.idealOffDays || 8; 
+    const progress = day / context.daysInMonth;
+    const expectedOffSoFar = totalIdealOff * progress;
+
+    // 2. 計算「實際已放幾天假」
+    const actualOff = getCurrentOffDays(uid, context, day);
+
+    // 3. 計算差距 (實際 - 應放)
+    // 正值：放太爽了 (欠班) -> 應該加分讓他上班
+    // 負值：太操了 (欠假) -> 應該扣分讓他休息
+    const diff = actualOff - expectedOffSoFar;
+
+    // 4. 每 5 天加重一次權重 (Step Function)
+    // Day 1-4: x1, Day 5-9: x2, Day 10-14: x3 ... Day 25+: x6
+    const multiplier = Math.floor(day / 5) + 1;
+    
+    // 總分 = 差距 * 基礎分 * 倍率
+    return diff * WEIGHTS.FAIRNESS_BASE * multiplier;
 };
 
-// 策略 A：數值平衡 (Statistical Balance) - 採用雙軌制
+// 策略 A：數值平衡
 export class BalanceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 1. 人力需求 (絕對優先)
+        // 1. 人力需求
         if (shift !== 'OFF') {
             if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 2. ✅ 雙軌制公平性演算法 (Dual-Track Fairness)
+        // 2. ✅ 公平性追趕 (針對上班班別)
         if (shift !== 'OFF') {
-            // A. 定義權重 (隨日期動態變化)
-            let longTermWeight = 0.6; // 前期：長期佔 60%
-            let shortTermWeight = 0.4; // 前期：短期佔 40%
-
-            if (day > 20) {
-                // 後期 (21號後)：強力收斂總數
-                longTermWeight = 0.9;
-                shortTermWeight = 0.1;
-            } else if (day > 10) {
-                // 中期 (11-20號)：逐漸加重長期
-                longTermWeight = 0.75;
-                shortTermWeight = 0.25;
-            }
-
-            // B. 計算短期分數 (防止連續太累)
-            const myShort = getShortTermWorkCount(uid, day, context, 3);
-            const avgShort = getCohortAverageShort(day, context, 3);
-            // 差距越大 (平均 > 我)，分數越高 -> 優先補班
-            const diffShort = avgShort - myShort; 
-            const shortScore = diffShort * shortTermWeight * WEIGHTS.FAIRNESS_BASE;
-
-            // C. 計算長期分數 (確保月底放假天數一致)
-            const myLong = getCurrentTotalShifts(uid, context.stats);
-            const avgLong = getCohortAverageLong(context);
-            // 差距越大 (平均 > 我)，分數越高 -> 優先補班
-            const diffLong = avgLong - myLong;
-            const longScore = diffLong * longTermWeight * WEIGHTS.FAIRNESS_BASE;
-
-            // D. 總合
-            score += (shortScore + longScore);
+            score += calculateFairnessScore(uid, day, context);
         }
 
         // 3. 基礎偏好
@@ -111,7 +78,7 @@ export class BalanceStrategy {
     }
 }
 
-// 策略 B：願望優先 (Wish Granter)
+// 策略 B：願望優先
 export class PreferenceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
@@ -129,24 +96,17 @@ export class PreferenceStrategy {
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 3. ✅ 引入輕量版雙軌制 (確保願望優先的同時，不要太失衡)
+        // 3. ✅ 公平性追趕 (即便是願望優先，也不能放假放太多)
         if (shift !== 'OFF') {
-            // 願望模式下，我們只看長期總數，且權重較低
-            const myLong = getCurrentTotalShifts(uid, context.stats);
-            const avgLong = getCohortAverageLong(context);
-            
-            // 後期 (20號後) 加強收斂
-            const fairnessWeight = (day > 20) ? 4000 : 1000; 
-            
-            const diff = avgLong - myLong;
-            score += diff * fairnessWeight; 
+            // 係數稍微調低一點點，保留願望的優先權
+            score += calculateFairnessScore(uid, day, context) * 0.8;
         }
 
         return score;
     }
 }
 
-// 策略 C：規律作息 (Rhythm Keeper)
+// 策略 C：規律作息
 export class PatternStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
@@ -159,30 +119,20 @@ export class PatternStrategy {
         if (shift === prev1 && shift !== 'OFF') score += WEIGHTS.CONTINUITY_BONUS;
         if (shift !== prev1 && prev1 !== 'OFF' && shift !== 'OFF') score += WEIGHTS.PATTERN_PENALTY;
         
-        // 2. 規律獎勵 (XX O)
         if (shift === 'OFF') {
             const p1Working = prev1 !== 'OFF' && prev1 !== 'M_OFF';
             if (p1Working && prev1 === prev2) score += WEIGHTS.TWO_DAY_BLOCK_BONUS;
         }
 
-        // 3. 人力需求
+        // 2. 人力需求
         if (shift !== 'OFF') {
             if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 4. ✅ 雙軌制 (同方案 A，但係數稍微調低以保留規律性)
+        // 3. ✅ 公平性追趕
         if (shift !== 'OFF') {
-            let longTermWeight = 0.6;
-            if (day > 20) longTermWeight = 0.9;
-            else if (day > 10) longTermWeight = 0.75;
-
-            const myLong = getCurrentTotalShifts(uid, context.stats);
-            const avgLong = getCohortAverageLong(context);
-            const diffLong = avgLong - myLong;
-            
-            // 規律模式下，公平性權重設為 4000 (比平衡模式 5000 稍低)
-            score += diffLong * longTermWeight * 4000;
+            score += calculateFairnessScore(uid, day, context);
         }
 
         return score;
