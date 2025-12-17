@@ -2,25 +2,38 @@
 
 const WEIGHTS = {
     NEED_MET: 0,          
-    NEED_MISSING: 500,    
-    OVER_STAFFED: -10000, 
+    NEED_MISSING: 1000,   // 提高缺人權重，確保有人上班
+    OVER_STAFFED: -20000, // 嚴重超編
     
-    PREF_P1: 1000,       
-    PREF_P2: 800,        
-    PREF_NO: -5000,       
+    PREF_P1: 800,         // 志願分稍微調降，讓公平性優先
+    PREF_P2: 500,        
+    PREF_NO: -9999,       
     
     CONTINUITY_BONUS: 50, 
     PATTERN_PENALTY: -50,
-    TWO_DAY_BLOCK_BONUS: 1000,
+    TWO_DAY_BLOCK_BONUS: 200,
 
-    // ✅ 新增：總量管制權重
-    OVER_WORK_HEAVY: -20000, // 嚴重超班 (禁止再排)
-    OVER_WORK_LIGHT: -5000,  // 輕微超班 (盡量不排)
-    UNDER_WORK: 5000         // 欠班 (優先排)
+    // ✅ 新增：公平性追趕力道 (數值越大，大家班數越接近)
+    FAIRNESS_STRENGTH: 5000 
 };
 
+// 輔助：計算該員目前的總班數
 const getCurrentTotalShifts = (uid, stats) => {
     return (stats[uid]?.D || 0) + (stats[uid]?.E || 0) + (stats[uid]?.N || 0);
+};
+
+// 輔助：計算全體人員目前的平均班數
+const getCohortAverage = (context) => {
+    let totalAll = 0;
+    const staffCount = context.staffList.length;
+    if (staffCount === 0) return 0;
+    
+    // 累加所有人的班數
+    context.staffList.forEach(s => {
+        const uid = s.uid;
+        totalAll += getCurrentTotalShifts(uid, context.stats);
+    });
+    return totalAll / staffCount;
 };
 
 export class BalanceStrategy {
@@ -29,31 +42,28 @@ export class BalanceStrategy {
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 1. 人力需求
+        // 1. 人力需求 (基礎)
         if (shift !== 'OFF') {
             if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 2. ✅ 總量管制 (平均分配)
-        const ideal = context.idealShifts || 20; // 預設值防呆
-        const myTotal = getCurrentTotalShifts(uid, context.stats);
-
+        // 2. ✅ 動態公平性追趕 (Dynamic Fairness)
+        // 核心邏輯：(平均班數 - 我的班數) * 力道
+        // 如果我班少 (平均 > 我)，結果為正，大加分 -> 優先排我
+        // 如果我班多 (平均 < 我)，結果為負，大扣分 -> 讓我休假
         if (shift !== 'OFF') {
-            // 已經排太多班了，強力扣分
-            if (myTotal > ideal + 1) {
-                score += WEIGHTS.OVER_WORK_HEAVY; 
-            } 
-            else if (myTotal > ideal) {
-                score += WEIGHTS.OVER_WORK_LIGHT;
-            }
-            // 班太少，強力加分
-            else if (myTotal < ideal - 1) {
-                score += WEIGHTS.UNDER_WORK;
-            }
+            const avgSoFar = getCohortAverage(context);
+            const myTotal = getCurrentTotalShifts(uid, context.stats);
+            
+            const diff = avgSoFar - myTotal; 
+            // 例如：平均 5.5，我 4 -> diff = 1.5 -> 加分 7500 (極高)
+            // 例如：平均 5.5，我 7 -> diff = -1.5 -> 扣分 7500 (極低)
+            
+            score += diff * WEIGHTS.FAIRNESS_STRENGTH;
         }
 
-        // 3. 偏好
+        // 3. 基礎偏好
         const prefs = context.preferences[uid] || {};
         if (prefs.p1 === shift) score += 100;
 
@@ -78,14 +88,14 @@ export class PreferenceStrategy {
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 3. ✅ 總量管制 (即使是願望優先，也不能超班太多)
-        const ideal = context.idealShifts || 20;
-        const myTotal = getCurrentTotalShifts(uid, context.stats);
-
+        // 3. ✅ 即使是願望優先，也要納入公平性 (但權重稍低)
         if (shift !== 'OFF') {
-            if (myTotal > ideal + 2) { // 稍微寬容一點 (+2)
-                score += WEIGHTS.OVER_WORK_HEAVY;
-            }
+            const avgSoFar = getCohortAverage(context);
+            const myTotal = getCurrentTotalShifts(uid, context.stats);
+            const diff = avgSoFar - myTotal;
+            
+            // 願望優先模式下，公平性權重設為 3000 (比平衡模式低，允許一點點差距換取願望)
+            score += diff * 3000; 
         }
 
         return score;
@@ -100,7 +110,7 @@ export class PatternStrategy {
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 1. 連續性與規律
+        // 1. 連續性
         if (shift === prev1 && shift !== 'OFF') score += WEIGHTS.CONTINUITY_BONUS;
         if (shift !== prev1 && prev1 !== 'OFF' && shift !== 'OFF') score += WEIGHTS.PATTERN_PENALTY;
         
@@ -115,13 +125,12 @@ export class PatternStrategy {
             else score += WEIGHTS.OVER_STAFFED;
         }
 
-        // 3. ✅ 總量管制
-        const ideal = context.idealShifts || 20;
-        const myTotal = getCurrentTotalShifts(uid, context.stats);
-
+        // 3. ✅ 公平性追趕
         if (shift !== 'OFF') {
-            if (myTotal > ideal + 1) score += WEIGHTS.OVER_WORK_HEAVY;
-            else if (myTotal < ideal - 1) score += WEIGHTS.UNDER_WORK;
+            const avgSoFar = getCohortAverage(context);
+            const myTotal = getCurrentTotalShifts(uid, context.stats);
+            const diff = avgSoFar - myTotal;
+            score += diff * WEIGHTS.FAIRNESS_STRENGTH;
         }
 
         return score;
