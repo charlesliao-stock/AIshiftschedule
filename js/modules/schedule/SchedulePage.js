@@ -11,10 +11,10 @@ export class SchedulePage {
         this.state = {
             currentUnitId: null, year: null, month: null,
             unitSettings: null, staffList: [], 
-            scheduleData: null,
+            scheduleData: null, // { assignments, prevAssignments, ... }
             daysInMonth: 0,
             scoreResult: null,
-            sortKey: 'id',
+            sortKey: 'id', // 預設依職編排序
             sortAsc: true
         };
         this.versionsModal = null; 
@@ -32,19 +32,23 @@ export class SchedulePage {
     }
 
     async render() {
+        // 內嵌 CSS 以支援複雜的左右固定表格
         const style = `
             <style>
                 .schedule-table-wrapper { position: relative; max-height: 100%; width: 100%; overflow: auto; }
                 .schedule-grid th, .schedule-grid td { vertical-align: middle; white-space: nowrap; padding: 2px 4px; height: 38px; border-color: #dee2e6; }
+                /* Sticky Columns 設定 */
                 .sticky-col { position: sticky; z-index: 10; }
                 .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; }
                 .second-col { left: 60px; z-index: 11; width: 80px; }
                 .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 60px; }
+                /* 右側固定欄位 */
                 .right-col-1 { right: 0; z-index: 11; border-left: 2px solid #ccc !important; width: 45px; } 
                 .right-col-2 { right: 45px; z-index: 11; width: 45px; }
                 .right-col-3 { right: 90px; z-index: 11; width: 45px; }
                 .right-col-4 { right: 135px; z-index: 11; border-left: 2px solid #999 !important; width: 45px; }
                 thead .sticky-col { z-index: 15 !important; }
+                /* 其他樣式 */
                 .bg-light-gray { background-color: #f8f9fa !important; color: #aaa; }
                 .shift-input:focus { background-color: #e8f0fe !important; font-weight: bold; outline: none; }
                 .cursor-pointer { cursor: pointer; }
@@ -59,6 +63,92 @@ export class SchedulePage {
         this.state.month = parseInt(params.get('month'));
 
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
+
+        // 設定 Modal HTML (優化版：分組顯示)
+        const modalHtml = `
+            <div class="modal fade" id="settings-modal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header bg-secondary text-white">
+                            <h5 class="modal-title"><i class="fas fa-sliders-h me-2"></i>規則與評分設定</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="settings-form">
+                                <div class="card mb-4 border-left-primary">
+                                    <div class="card-header bg-light fw-bold text-primary">
+                                        1. 排班限制與例外 (Rules & Exceptions)
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-12">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="set-interval-11h">
+                                                    <label class="form-check-label fw-bold" for="set-interval-11h">啟用「班別間隔 11 小時」檢查</label>
+                                                    <div class="form-text small text-muted">防止逆向排班 (如小夜接白班)，確保休息時間。</div>
+                                                </div>
+                                            </div>
+                                            <hr class="my-2 text-muted">
+                                            <div class="col-md-6">
+                                                <label class="form-label fw-bold">連續上班天數上限 (一般)</label>
+                                                <div class="input-group">
+                                                    <input type="number" class="form-control" id="set-max-consecutive" value="6" min="1" max="14">
+                                                    <span class="input-group-text">天</span>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6 d-flex align-items-center">
+                                                <div class="form-check mt-4">
+                                                    <input class="form-check-input" type="checkbox" id="set-allow-long-leave">
+                                                    <label class="form-check-label" for="set-allow-long-leave">
+                                                        <strong>允許長假例外：</strong>
+                                                        長假/積假人員可連上 7 天
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card mb-3 border-left-success">
+                                    <div class="card-header bg-light fw-bold text-success">
+                                        2. 預班保障與 AI 權重 (Preferences & Scoring)
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-12 mb-2">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="set-guarantee-preschedule">
+                                                    <label class="form-check-label fw-bold" for="set-guarantee-preschedule">預班絕對保障 (Hard Lock)</label>
+                                                    <div class="form-text small">開啟後，員工預班直接鎖定，不可被 AI 更動 (若人力不足可能導致排班失敗)。</div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label fw-bold">Rank 1 (第一志願) 加分權重</label>
+                                                <input type="range" class="form-range" id="set-weight-p1" min="10" max="100" step="10">
+                                                <div class="d-flex justify-content-between small text-muted">
+                                                    <span>10</span><span id="val-weight-p1" class="fw-bold text-success">--</span><span>100</span>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label fw-bold">Rank 2 (第二志願) 加分權重</label>
+                                                <input type="range" class="form-range" id="set-weight-p2" min="5" max="50" step="5">
+                                                <div class="d-flex justify-content-between small text-muted">
+                                                    <span>5</span><span id="val-weight-p2" class="fw-bold text-success">--</span><span>50</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                            <button type="button" class="btn btn-primary" onclick="window.routerPage.saveSettings()">儲存設定</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
 
         return `
             ${style}
@@ -77,7 +167,7 @@ export class SchedulePage {
                             <span class="ms-1 small">分</span>
                         </div>
 
-                        <button id="btn-settings" class="btn btn-outline-secondary" title="排班規則設定">
+                        <button id="btn-settings" class="btn btn-outline-secondary" title="規則與評分設定">
                             <i class="fas fa-cog"></i> 設定
                         </button>
 
@@ -87,7 +177,8 @@ export class SchedulePage {
                     </div>
                 </div>
 
-                <div class="flex-grow-1 overflow-auto bg-light p-3" id="schedule-grid-container"></div>
+                <div class="flex-grow-1 overflow-auto bg-light p-3" id="schedule-grid-container">
+                    </div>
             </div>
 
             <div class="modal fade" id="score-modal" tabindex="-1">
@@ -129,69 +220,7 @@ export class SchedulePage {
                 </div>
             </div>
 
-            <div class="modal fade" id="settings-modal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header bg-secondary text-white">
-                            <h5 class="modal-title"><i class="fas fa-sliders-h me-2"></i>排班規則與偏好設定</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <form id="settings-form">
-                                <h6 class="fw-bold text-primary border-bottom pb-2 mb-3">1. 勞基法與硬限制 (Hard Constraints)</h6>
-                                <div class="row g-3 mb-4">
-                                    <div class="col-md-6">
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" id="set-interval-11h">
-                                            <label class="form-check-label fw-bold" for="set-interval-11h">啟用「班別間隔 11 小時」檢查</label>
-                                            <div class="form-text small">防止逆向排班 (如小夜接白班)，確保休息時間。</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">連續上班天數上限</label>
-                                        <input type="number" class="form-control" id="set-max-consecutive" value="6" min="1" max="14">
-                                    </div>
-                                    <div class="col-md-12">
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" id="set-allow-long-leave">
-                                            <label class="form-check-label" for="set-allow-long-leave">允許例外：長假/積假者可連上 7 天 (針對積假需求)</label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <h6 class="fw-bold text-success border-bottom pb-2 mb-3">2. 預班與偏好 (Preferences)</h6>
-                                <div class="row g-3 mb-4">
-                                    <div class="col-md-12">
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" id="set-guarantee-preschedule">
-                                            <label class="form-check-label fw-bold" for="set-guarantee-preschedule">預班絕對保障 (Hard Lock)</label>
-                                            <div class="form-text small">開啟：員工預班直接鎖定，不可更動 (可能導致排班無解)。關閉：視為高分願望，AI 可在必要時協調。</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">第一志願 (Rank 1) 權重</label>
-                                        <input type="range" class="form-range" id="set-weight-p1" min="10" max="100" step="10">
-                                        <div class="d-flex justify-content-between small text-muted">
-                                            <span>低</span><span id="val-weight-p1">50</span><span>高</span>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">第二志願 (Rank 2) 權重</label>
-                                        <input type="range" class="form-range" id="set-weight-p2" min="5" max="50" step="5">
-                                        <div class="d-flex justify-content-between small text-muted">
-                                            <span>低</span><span id="val-weight-p2">20</span><span>高</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </form>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                            <button type="button" class="btn btn-primary" onclick="window.routerPage.saveSettings()">儲存設定</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            ${modalHtml}
         `;
     }
 
@@ -228,7 +257,6 @@ export class SchedulePage {
         if (this.state.activeMenu) { this.state.activeMenu.remove(); this.state.activeMenu = null; }
     }
     
-    // --- 載入與設定邏輯 ---
     async loadData() {
         const container = document.getElementById('schedule-grid-container');
         const loading = document.getElementById('loading-indicator');
@@ -289,22 +317,28 @@ export class SchedulePage {
 
     // 儲存設定
     async saveSettings() {
+        // 保留舊的設定，只更新變動部分
+        const currentRules = this.state.unitSettings?.settings?.rules || {};
+        const currentConstraints = currentRules.constraints || {};
+        const currentWeights = currentRules.weights || {};
+
         const newRules = {
+            ...currentRules, // 保留可能存在的其他規則
             maxConsecutiveWork: parseInt(document.getElementById('set-max-consecutive').value),
             constraints: {
+                ...currentConstraints,
                 minInterval11h: document.getElementById('set-interval-11h').checked,
                 allowLongLeaveException: document.getElementById('set-allow-long-leave').checked,
                 guaranteePreSchedule: document.getElementById('set-guarantee-preschedule').checked
             },
             weights: {
+                ...currentWeights,
                 rank1: parseInt(document.getElementById('set-weight-p1').value),
                 rank2: parseInt(document.getElementById('set-weight-p2').value)
             }
         };
 
         try {
-            // 更新單位設定
-            // 注意：需保留原有的 shifts 設定
             const currentSettings = this.state.unitSettings.settings || {};
             const updatedSettings = {
                 ...currentSettings,
@@ -313,10 +347,9 @@ export class SchedulePage {
 
             await UnitService.updateUnit(this.state.currentUnitId, { settings: updatedSettings });
             
-            // 更新本地 State
             this.state.unitSettings.settings = updatedSettings;
             
-            alert("設定已儲存！下次 AI 排班將套用新規則。");
+            alert("設定已儲存！");
             this.settingsModal.hide();
         } catch (e) {
             console.error(e);
@@ -324,15 +357,11 @@ export class SchedulePage {
         }
     }
 
-    // ... (renderGrid, calculateRowStats, sortStaff, openShiftMenu, handleShiftSelect, updateScoreDisplay, showScoreDetails, resetToPreSchedule, togglePublish, updateStatusBadge 保持不變) ...
-    // 請保留原有的這些方法，因為篇幅關係未重複列出
-
     renderGrid() {
-        // ... (同上一個版本) ...
         const container = document.getElementById('schedule-grid-container');
         const { year, month, daysInMonth, staffList, scheduleData, sortKey, sortAsc } = this.state;
         const assignments = scheduleData.assignments || {};
-        const prevAssignments = scheduleData.prevAssignments || {}; 
+        const prevAssignments = scheduleData.prevAssignments || {};
 
         const prevMonthLastDate = new Date(year, month - 1, 0); 
         const prevLastDayVal = prevMonthLastDate.getDate();
@@ -387,7 +416,9 @@ export class SchedulePage {
             prevDaysToShow.forEach(d => { html += `<td class="bg-light-gray text-muted small">${prevUserShifts[d] || '-'}</td>`; });
             for (let d = 1; d <= daysInMonth; d++) {
                 const val = userShifts[d] || '';
-                html += `<td class="p-0 shift-cell" data-staff-id="${uid}" data-day="${d}" onclick="window.routerPage.openShiftMenu(this)" style="${val==='OFF'?'background:#f0f0f0':''}">${val}</td>`;
+                html += `<td class="p-0 shift-cell" data-staff-id="${uid}" data-day="${d}" onclick="window.routerPage.openShiftMenu(this)" style="${val==='OFF'?'background:#f0f0f0':''}">
+                            ${val}
+                         </td>`;
             }
             html += `
                     <td class="sticky-col right-col-4 bg-white fw-bold text-primary" id="stat-off-${uid}">${stats.off}</td>
@@ -424,7 +455,11 @@ export class SchedulePage {
     }
 
     openShiftMenu(cell) {
-        const shifts = this.state.unitSettings?.settings?.shifts || [{code:'D',name:'白',color:'#fff'},{code:'E',name:'小',color:'#fff'},{code:'N',name:'大',color:'#fff'}];
+        const shifts = this.state.unitSettings?.settings?.shifts || [
+            {code:'D', name:'白班', color:'#fff'},
+            {code:'E', name:'小夜', color:'#fff'},
+            {code:'N', name:'大夜', color:'#fff'}
+        ];
         this.closeMenu();
         const menu = document.createElement('div');
         menu.className = 'shift-menu shadow rounded border bg-white';
@@ -433,6 +468,7 @@ export class SchedulePage {
         [...shifts, ...opts].forEach(s => {
             if(s.code === 'OFF' || s.code === '') return;
         });
+        
         const renderItem = (s) => {
             const item = document.createElement('div');
             item.className = 'p-1'; item.style.cursor = 'pointer';
