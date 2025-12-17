@@ -467,21 +467,35 @@ export class SchedulePage {
         container.innerHTML = html;
     }
 
+// ... (在 SchedulePage class 內部)
+
     calculateRowStats(shifts) {
         let off = 0, e = 0, n = 0, hol = 0;
         const { year, month, daysInMonth } = this.state;
+
+        // 遍歷本月每一天 (1號 ~ 月底)
         for (let d = 1; d <= daysInMonth; d++) {
             const s = shifts[d];
             if (!s) continue;
+
+            // 1. 統計 OFF, E, N 總數
             if (['OFF', 'M_OFF'].includes(s)) off++;
             if (s === 'E') e++;
             if (s === 'N') n++;
+
+            // 2. 統計假日放假數 (Sat/Sun OFF)
             const date = new Date(year, month - 1, d);
-            const w = date.getDay();
-            if ((w === 0 || w === 6) && !['OFF', 'M_OFF'].includes(s)) hol++;
+            const w = date.getDay(); // 0=週日, 6=週六
+
+            // 若是週六或週日，且班別是 OFF 或 M_OFF，列入假日計數
+            if ((w === 0 || w === 6) && ['OFF', 'M_OFF'].includes(s)) {
+                hol++;
+            }
         }
         return { off, e, n, hol };
     }
+
+    // ... (其餘程式碼保持不變)
 
     sortStaff(key) {
         if (this.state.sortKey === key) this.state.sortAsc = !this.state.sortAsc;
