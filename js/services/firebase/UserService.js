@@ -6,6 +6,7 @@ import {
 import { createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 export const userService = {
+    // 取得所有使用者 (全院)
     async getAllUsers() {
         try {
             const q = query(collection(db, "users"));
@@ -64,14 +65,14 @@ export const userService = {
     async getUnitStaff(unitId) { return this.getUsersByUnit(unitId); },
     async getAllStaffCount() { const list = await this.getAllUsers(); return list.length; },
     
-    // ✅ 搜尋功能
+    // ✅ 關鍵修復：搜尋功能
     async searchUsers(keyword) {
         const list = await this.getAllUsers();
         if (!keyword) return [];
         const k = keyword.toLowerCase();
         return list.filter(u => 
             (u.name && u.name.toLowerCase().includes(k)) || 
-            (u.staffId && String(u.staffId).toLowerCase().includes(k))
+            (u.staffId && String(u.staffId).toLowerCase().includes(k)) // 強制轉型 String 避免數字報錯
         );
     }
 };
