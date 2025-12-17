@@ -14,14 +14,13 @@ export class AutoScheduler {
             if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
             if (strategyCode === 'C') StrategyEngine = PatternStrategy;
 
-            // 準備 Context
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
             context.StrategyEngine = StrategyEngine;
 
-            // 預填
+            // 2. 預填包班與預班
             this.prefillFixedShifts(context);
 
-            // 運算
+            // 3. 每日步進求解
             const success = await this.solveDay(1, context);
 
             const duration = (Date.now() - startTime) / 1000;
@@ -38,19 +37,17 @@ export class AutoScheduler {
 
     static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode) {
         const assignments = {};
-        const preferences = {}; // 儲存 Rank 1, Rank 2
+        const preferences = {};
         const whitelists = {};
         const stats = {}; 
         const lastMonthConsecutive = {}; 
         const historyAssignments = preScheduleData.assignments || {};
 
-        // 讀取設定
         const rules = unitSettings.settings?.rules || {};
         const globalMax = rules.maxConsecutiveWork || 6;
         const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
         
-        // ✅ 修正：正確讀取人力需求 (Staff Requirements)
-        // 格式: { D: [4,4,4,4,4,3,4], E: [...], N: [...] } (index 0=週日)
+        // 讀取人力需求
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
         staffList.forEach(s => {
@@ -58,36 +55,95 @@ export class AutoScheduler {
             assignments[uid] = {};
             stats[uid] = { D:0, E:0, N:0, OFF:0 };
             
-            // 歷史回溯 (略...同前版)
-            // ... (請保留原本的歷史回溯代碼) ...
-            // 為節省空間，假設此處已正確填入 lastMonthConsecutive 與 assignments[uid][0]
-            assignments[uid][0] = 'OFF'; // 暫時預設，請用原版邏輯
-            lastMonthConsecutive[uid] = 0; 
+            // --- 1. 歷史回溯 (計算連續天數) ---
+            const userHistory = historyAssignments[uid] || {};
+            const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a);
+            
+            let lastDayShift = 'OFF';
+            let cons = 0;
 
-            // 上限計算
+            if (days.length > 0) {
+                const lastDayKey = days[0];
+                lastDayShift = userHistory[lastDayKey] || 'OFF';
+                for (let d of days) {
+                    const shift = userHistory[d];
+                    if (shift && shift !== 'OFF' && shift !== 'M_OFF') cons++;
+                    else break;
+                }
+            }
+            
+            lastMonthConsecutive[uid] = cons;
+            assignments[uid][0] = lastDayShift;
+
             let myMaxConsecutive = globalMax;
             if (allowLongLeave && s.isLongLeave) myMaxConsecutive = 7;
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // 白名單
-            let allowed = ['D', 'N', 'OFF']; 
-            // ... (白名單邏輯同前版) ...
+            // --- 2. 關鍵修正：嚴格白名單邏輯 (Strict Whitelist) ---
+            const staticFixed = s.constraints?.allowFixedShift ? s.constraints.fixedShiftConfig : null; // 靜態包班設定
+            const staticLane = s.constraints?.rotatingLane || 'DN'; // 靜態組別 (預設 DN)
+            
+            // 讀取當月預班偏好
+            const sub = preScheduleData.submissions?.[uid] || {};
+            const pref = sub.preferences || {};
+            const monthlyBatch = pref.batch; // 當月選擇包班
+            const monthlyMix = pref.monthlyMix; // 2種 or 3種
+
+            let allowed = []; 
+
+            // (A) 母性保護/特殊身分：最高優先，只排白班
+            if (s.constraints?.isPregnant || s.constraints?.isSpecialStatus) {
+                allowed = ['D', 'OFF'];
+            }
+            // (B) 當月選擇包班：次高優先，鎖定該班別
+            else if (monthlyBatch === 'N') {
+                allowed = ['N', 'OFF'];
+            }
+            else if (monthlyBatch === 'E') {
+                allowed = ['E', 'OFF'];
+            }
+            // (C) 靜態設定包班 (若當月沒選，但人員屬性是包班)：鎖定
+            else if (!monthlyBatch && staticFixed === 'N') {
+                allowed = ['N', 'OFF'];
+            }
+            else if (!monthlyBatch && staticFixed === 'E') {
+                allowed = ['E', 'OFF'];
+            }
+            // (D) 一般輪班 (Rotating)
+            else {
+                // 基礎：依據靜態組別 (DN 或 DE)
+                if (staticLane === 'DE') allowed = ['D', 'E', 'OFF'];
+                else allowed = ['D', 'N', 'OFF']; // 預設 DN
+
+                // 動態調整：依據當月偏好擴充
+                // 若選擇「混和3種」，則全開
+                if (monthlyMix === '3') {
+                    allowed = ['D', 'E', 'N', 'OFF'];
+                } else {
+                    // 若選擇「混和2種」(預設)，檢查 P1/P2 是否有填寫「非組別」的班
+                    // 例如：本來是 DN 組，但 P1 填了 E，表示本月想上 E，應允許
+                    const wishes = [pref.priority1, pref.priority2, pref.priority3];
+                    if (wishes.includes('E') && !allowed.includes('E')) allowed.push('E');
+                    if (wishes.includes('N') && !allowed.includes('N')) allowed.push('N');
+                    if (wishes.includes('D') && !allowed.includes('D')) allowed.push('D');
+                }
+            }
+            
             whitelists[uid] = allowed;
             
-            // 填入預班
-            const sub = preScheduleData.submissions?.[uid] || {};
+            // --- 3. 填入預班 (Wishes) ---
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
                 });
             }
 
-            // ✅ 修正：讀取偏好 (PreScheduleSubmitPage 存入的 priority1, priority2)
+            // --- 4. 讀取偏好 (Preferences) ---
             preferences[uid] = {
-                p1: sub.preferences?.priority1,
-                p2: sub.preferences?.priority2,
-                p3: sub.preferences?.priority3
+                p1: pref.priority1,
+                p2: pref.priority2,
+                p3: pref.priority3
             };
         });
 
@@ -97,31 +153,42 @@ export class AutoScheduler {
             daysInMonth: new Date(currentSchedule.year, currentSchedule.month, 0).getDate(),
             staffList: staffList.map(s => ({ ...s, uid: s.uid || s.id })),
             assignments,
-            preferences, // 傳入偏好
+            preferences,
             whitelists,
             stats,
             lastMonthConsecutive,
             shiftDefs: unitSettings.settings?.shifts || [],
-            staffReq, // 傳入人力需求
+            staffReq,
             logs: [],
             startTime: Date.now()
         };
     }
 
     static prefillFixedShifts(context) {
-        // ... (同前版) ...
+        Object.entries(context.whitelists).forEach(([uid, allowed]) => {
+            const workingShift = allowed.find(s => s !== 'OFF');
+            // 若白名單只有 [Working, OFF] 兩項，且沒有被預班鎖定，則預填
+            // 這樣可以確保包班者優先佔據該班別名額
+            if (allowed.length === 2 && workingShift) {
+                for (let d = 1; d <= context.daysInMonth; d++) {
+                    if (!context.assignments[uid][d]) {
+                        context.assignments[uid][d] = workingShift;
+                        context.stats[uid][workingShift]++;
+                    }
+                }
+            }
+        });
     }
 
     static async solveDay(day, context) {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
         if (day > context.daysInMonth) return true;
 
-        // ✅ 修正：每日隨機打亂順序，避免固定人員總是先被排到 (解決公平性問題)
+        // 隨機打亂順序，避免固定人員總是先被排到
         const pending = context.staffList.filter(s => !context.assignments[s.uid][day]);
         this.shuffleArray(pending);
 
         const success = await this.solveRecursive(day, pending, 0, context);
-        // 即使當天無解也強制推進
         return await this.solveDay(day + 1, context);
     }
 
@@ -139,7 +206,7 @@ export class AutoScheduler {
             if (sh && sh !== 'OFF') currentCounts[sh] = (currentCounts[sh]||0) + 1;
         });
 
-        // 取得候選班別並評分
+        // 根據策略計算分數並排序
         let candidates = context.whitelists[uid].map(shift => ({
             shift,
             score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w)
@@ -148,7 +215,6 @@ export class AutoScheduler {
         for (const item of candidates) {
             const shift = item.shift;
             
-            // 嘗試填入
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
@@ -172,6 +238,7 @@ export class AutoScheduler {
             delete context.assignments[uid][day];
         }
 
+        // 若無解，暫填 OFF 以推進
         context.assignments[uid][day] = 'OFF';
         return true;
     }
