@@ -1,5 +1,5 @@
 import { RuleEngine } from "./RuleEngine.js";
-import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
+import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "../modules/ai/AIStrategies.js";
 
 const MAX_RUNTIME = 60000;
 
