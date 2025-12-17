@@ -14,15 +14,15 @@ export class SchedulePage {
             scheduleData: null, 
             daysInMonth: 0,
             scoreResult: null,
-            sortKey: 'id', 
+            sortKey: 'staffId', // 預設依職編排序
             sortAsc: true,
-            unitMap: {} 
+            unitMap: {},
+            preSchedule: null // 暫存預班表資料 (用於讀取備註與偏好)
         };
         this.versionsModal = null; 
         this.scoreModal = null;
         this.settingsModal = null; 
         this.generatedVersions = [];
-        // 這一行會報錯是因為下方沒有定義 handleGlobalClick
         this.handleGlobalClick = this.handleGlobalClick.bind(this);
     }
 
@@ -41,7 +41,7 @@ export class SchedulePage {
                 .sticky-col { position: sticky; z-index: 10; }
                 .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; }
                 .second-col { left: 60px; z-index: 11; width: 80px; }
-                .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 60px; }
+                .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 100px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
                 .right-col-1 { right: 0; z-index: 11; border-left: 2px solid #ccc !important; width: 45px; } 
                 .right-col-2 { right: 45px; z-index: 11; width: 45px; }
                 .right-col-3 { right: 90px; z-index: 11; width: 45px; }
@@ -52,6 +52,7 @@ export class SchedulePage {
                 .cursor-pointer { cursor: pointer; }
                 .shift-cell { cursor: pointer; transition: background 0.1s; }
                 .shift-cell:hover { background-color: #e9ecef; }
+                .sort-icon { font-size: 0.7rem; margin-left: 2px; color: #666; }
             </style>
         `;
 
@@ -62,6 +63,7 @@ export class SchedulePage {
 
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
 
+        // 設定 Modal HTML
         const modalHtml = `
             <div class="modal fade" id="settings-modal" tabindex="-1">
                 <div class="modal-dialog modal-lg">
@@ -182,14 +184,12 @@ export class SchedulePage {
         document.getElementById('btn-publish').addEventListener('click', () => this.togglePublish());
         document.getElementById('btn-settings').addEventListener('click', () => this.openSettingsModal());
 
-        // 綁定全域點擊事件
         document.removeEventListener('click', this.handleGlobalClick); 
         document.addEventListener('click', this.handleGlobalClick);
 
         await this.loadData();
     }
 
-    // ✅ 這就是缺失的函式，必須存在！
     handleGlobalClick(e) {
         if (!e.target.closest('.shift-menu') && !e.target.closest('.shift-cell') && this.state.activeMenu) {
             this.closeMenu();
@@ -200,24 +200,39 @@ export class SchedulePage {
         if (this.state.activeMenu) { this.state.activeMenu.remove(); this.state.activeMenu = null; }
     }
     
+    // 核心資料載入：同步預班表人員名單
     async loadData() {
         const container = document.getElementById('schedule-grid-container');
         const loading = document.getElementById('loading-indicator');
         if(loading) loading.style.display = 'block';
 
         try {
-            const [unit, staffList, schedule, allUnits] = await Promise.all([
+            // 先載入預班表 (為了取得正確的人員名單)
+            const preSchedule = await PreScheduleService.getPreSchedule(this.state.currentUnitId, this.state.year, this.state.month);
+            this.state.preSchedule = preSchedule; // 暫存以供 render 使用
+
+            // 決定人員名單：Snapshot (最優先) > StaffIds (次之) > UnitStaff (最後)
+            let staffList = [];
+            if (preSchedule && preSchedule.staffSnapshots && preSchedule.staffSnapshots.length > 0) {
+                staffList = preSchedule.staffSnapshots;
+            } else if (preSchedule && preSchedule.staffIds && preSchedule.staffIds.length > 0) {
+                const promises = preSchedule.staffIds.map(uid => userService.getUserData(uid));
+                const users = await Promise.all(promises);
+                staffList = users.filter(u => u);
+            } else {
+                staffList = await userService.getUnitStaff(this.state.currentUnitId);
+            }
+
+            const [unit, schedule, allUnits] = await Promise.all([
                 UnitService.getUnitByIdWithCache(this.state.currentUnitId),
-                userService.getUnitStaff(this.state.currentUnitId),
                 ScheduleService.getSchedule(this.state.currentUnitId, this.state.year, this.state.month),
                 UnitService.getAllUnits()
             ]);
 
             this.state.unitSettings = unit;
-            this.state.staffList = staffList;
+            this.state.staffList = staffList; // 使用同步後的人員名單
             this.state.daysInMonth = new Date(this.state.year, this.state.month, 0).getDate();
             
-            // 建立單位對照表
             this.state.unitMap = {};
             if (allUnits) {
                 allUnits.forEach(u => this.state.unitMap[u.unitId] = u.unitName);
@@ -292,15 +307,26 @@ export class SchedulePage {
 
     renderGrid() {
         const container = document.getElementById('schedule-grid-container');
-        const { year, month, daysInMonth, staffList, scheduleData, sortKey, sortAsc, unitMap, currentUnitId } = this.state;
+        const { year, month, daysInMonth, staffList, scheduleData, sortKey, sortAsc, unitMap, currentUnitId, preSchedule } = this.state;
         const assignments = scheduleData.assignments || {};
         const prevAssignments = scheduleData.prevAssignments || {};
 
+        // 排序邏輯
         staffList.sort((a, b) => {
-            const valA = a[sortKey] || '';
-            const valB = b[sortKey] || '';
-            return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            let valA = '', valB = '';
+            if (sortKey === 'staffId') {
+                valA = a.staffId || ''; valB = b.staffId || '';
+            } else if (sortKey === 'name') {
+                valA = a.name || ''; valB = b.name || '';
+            } else {
+                valA = a.id || ''; valB = b.id || '';
+            }
+            if (valA < valB) return sortAsc ? -1 : 1;
+            if (valA > valB) return sortAsc ? 1 : -1;
+            return 0;
         });
+
+        const getArrow = (key) => (sortKey === key ? (sortAsc ? '▲' : '▼') : '');
 
         const getDisplayName = (staff) => {
             if (!staff.unitId || staff.unitId === currentUnitId) return staff.name;
@@ -308,16 +334,46 @@ export class SchedulePage {
             return `${staff.name}<span class="text-danger small ms-1">(${uName})</span>`;
         };
 
+        // 整合備註：排班備註 + 偏好
+        const getNoteContent = (staff) => {
+            let parts = [];
+            const sub = preSchedule?.submissions?.[staff.uid];
+            
+            // 1. 排班備註
+            if (sub?.notes) parts.push(sub.notes);
+            
+            // 2. 偏好 (包班、順位)
+            if (sub?.preferences) {
+                const p = sub.preferences;
+                let prefStr = '';
+                if (p.batch) prefStr += `[包${p.batch}] `;
+                let ranks = [];
+                if (p.priority1) ranks.push(p.priority1);
+                if (p.priority2) ranks.push(p.priority2);
+                if (ranks.length > 0) prefStr += ranks.join('>');
+                if (prefStr) parts.push(prefStr);
+            }
+            
+            // 3. 人員基本備註 (若有)
+            if (staff.note) parts.push(staff.note);
+
+            return parts.join(' | ');
+        };
+
         let html = `
             <div class="schedule-table-wrapper shadow-sm bg-white rounded">
                 <table class="table table-bordered table-sm text-center mb-0 align-middle schedule-grid">
                     <thead class="bg-light">
                         <tr>
-                            <th class="sticky-col first-col bg-light cursor-pointer" onclick="window.routerPage.sortStaff('id')">職編 ${sortKey==='id' ? (sortAsc?'↑':'↓') : ''}</th>
-                            <th class="sticky-col second-col bg-light">姓名</th>
+                            <th class="sticky-col first-col bg-light cursor-pointer" onclick="window.routerPage.sortStaff('staffId')" title="依職編排序">
+                                職編 <span class="sort-icon">${getArrow('staffId')}</span>
+                            </th>
+                            <th class="sticky-col second-col bg-light cursor-pointer" onclick="window.routerPage.sortStaff('name')" title="依姓名排序">
+                                姓名 <span class="sort-icon">${getArrow('name')}</span>
+                            </th>
                             <th class="sticky-col third-col bg-light">備註</th>
         `;
-        // ... (日期標題生成)
+        
         const prevMonthLastDate = new Date(year, month - 1, 0); 
         const prevLastDayVal = prevMonthLastDate.getDate();
         const prevDaysToShow = [];
@@ -343,12 +399,13 @@ export class SchedulePage {
             const userShifts = assignments[uid] || {};
             const prevUserShifts = prevAssignments[uid] || {};
             const stats = this.calculateRowStats(userShifts);
+            const noteText = getNoteContent(staff);
 
             html += `
                 <tr>
-                    <td class="sticky-col first-col bg-white fw-bold">${staff.id || ''}</td>
+                    <td class="sticky-col first-col bg-white fw-bold">${staff.staffId || staff.id || ''}</td>
                     <td class="sticky-col second-col bg-white text-nowrap">${getDisplayName(staff)}</td>
-                    <td class="sticky-col third-col bg-white small text-muted text-truncate" title="${staff.note || ''}">${staff.note || ''}</td>
+                    <td class="sticky-col third-col bg-white small text-muted text-truncate" title="${noteText}">${noteText}</td>
             `;
             prevDaysToShow.forEach(d => { html += `<td class="bg-light-gray text-muted small">${prevUserShifts[d] || '-'}</td>`; });
             for (let d = 1; d <= daysInMonth; d++) {
@@ -393,12 +450,18 @@ export class SchedulePage {
 
     openShiftMenu(cell) {
         const shifts = this.state.unitSettings?.settings?.shifts || [
-            {code:'D', name:'白班', color:'#fff'}, {code:'E', name:'小夜', color:'#fff'}, {code:'N', name:'大夜', color:'#fff'}
+            {code:'D', name:'白班', color:'#fff'},
+            {code:'E', name:'小夜', color:'#fff'},
+            {code:'N', name:'大夜', color:'#fff'}
         ];
         this.closeMenu();
         const menu = document.createElement('div');
         menu.className = 'shift-menu shadow rounded border bg-white';
         menu.style.position = 'absolute'; menu.style.zIndex = '1000'; menu.style.padding = '5px';
+        const opts = [{ code: '', name: '清除', color: 'transparent' }, { code: 'OFF', name: '休假', color: '#e5e7eb' }];
+        [...shifts, ...opts].forEach(s => {
+            if(s.code === 'OFF' || s.code === '') return;
+        });
         
         const renderItem = (s) => {
             const item = document.createElement('div');
@@ -532,6 +595,7 @@ export class SchedulePage {
 
     async runMultiVersionAI() {
         if (!confirm("確定執行智慧排班？\n系統將平行運算三種策略：\n1. 數值平衡 (A)\n2. 願望優先 (B)\n3. 規律作息 (C)")) return;
+        
         this.versionsModal.show();
         const progressBar = document.getElementById('ai-progress-bar');
         const progressText = document.getElementById('ai-progress-text');
@@ -546,10 +610,14 @@ export class SchedulePage {
 
         try {
             this.generatedVersions = [];
+            
             let prevY = this.state.year, prevM = this.state.month - 1;
             if(prevM===0) { prevM=12; prevY--; }
             
-            let preScheduleData = { assignments: this.state.scheduleData.prevAssignments || {}, submissions: {} };
+            let preScheduleData = { 
+                assignments: this.state.scheduleData.prevAssignments || {},
+                submissions: {} 
+            };
             try {
                 const rawPre = await PreScheduleService.getPreSchedule(this.state.currentUnitId, this.state.year, this.state.month);
                 if(rawPre) preScheduleData.submissions = rawPre.submissions;
@@ -585,6 +653,7 @@ export class SchedulePage {
                     label: ver.name,
                     logs: result.logs
                 });
+                
                 await new Promise(r => setTimeout(r, 100));
             }
 
@@ -604,14 +673,18 @@ export class SchedulePage {
         this.generatedVersions.forEach((v, idx) => {
             const tabPane = document.getElementById(`v${v.id}`);
             if(!tabPane) return;
+            
             const scoreColor = v.score.totalScore >= 80 ? 'text-success' : (v.score.totalScore >= 60 ? 'text-warning' : 'text-danger');
+            
             let previewHtml = `
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <div>
                         <h4 class="${scoreColor} fw-bold mb-0">${v.score.totalScore} 分</h4>
                         <small class="text-muted">策略偏好：${v.label}</small>
                     </div>
-                    <button class="btn btn-primary" onclick="window.routerPage.applyVersion(${idx})"><i class="bi bi-check-lg"></i> 套用此版本</button>
+                    <button class="btn btn-primary" onclick="window.routerPage.applyVersion(${idx})">
+                        <i class="bi bi-check-lg"></i> 套用此版本
+                    </button>
                 </div>
                 <div class="table-responsive border rounded" style="max-height: 400px;">
                     <table class="table table-sm table-bordered text-center mb-0" style="font-size:0.8rem;">
@@ -632,6 +705,7 @@ export class SchedulePage {
                                         else if(val==='N') { bg='#343a40'; color='#fff'; }
                                         else if(val==='E') { bg='#ffc107'; color='#000'; }
                                         else if(val==='D') { bg='#fff'; color='#0d6efd'; }
+                                        
                                         return `<td style="background:${bg};color:${color}">${val}</td>`;
                                     }).join('')}
                                 </tr>
@@ -643,11 +717,19 @@ export class SchedulePage {
                     <h6 class="fw-bold border-bottom pb-2">評分細節</h6>
                     <div class="row g-2">
                         ${Object.values(v.score.details).map(d => 
-                            `<div class="col-6 col-md-4"><div class="d-flex justify-content-between border rounded p-2 bg-light"><span class="small">${d.label}</span> <span class="fw-bold ${d.score < d.max * 0.6 ? 'text-danger' : 'text-success'}">${Math.round(d.score)} / ${d.max}</span></div></div>`
+                            `<div class="col-6 col-md-4">
+                                <div class="d-flex justify-content-between border rounded p-2 bg-light">
+                                    <span class="small">${d.label}</span> 
+                                    <span class="fw-bold ${d.score < d.max * 0.6 ? 'text-danger' : 'text-success'}">
+                                        ${Math.round(d.score)} / ${d.max}
+                                    </span>
+                                </div>
+                             </div>`
                         ).join('')}
                     </div>
                 </div>
             `;
+            
             tabPane.innerHTML = previewHtml;
         });
     }
@@ -655,19 +737,33 @@ export class SchedulePage {
     async applyVersion(index) {
         const selected = this.generatedVersions[index];
         if (!selected) return;
+
         if(!confirm(`確定套用「版本 ${selected.id} (${selected.score.totalScore}分)」？\n這將覆蓋目前的排班表內容。`)) return;
+
         const loading = document.getElementById('loading-indicator');
         if(loading) loading.style.display = 'block';
+
         try {
             this.state.scheduleData.assignments = JSON.parse(JSON.stringify(selected.assignments));
+            
             await ScheduleService.updateAllAssignments(
-                this.state.currentUnitId, this.state.year, this.state.month, 
-                this.state.scheduleData.assignments, this.state.scheduleData.prevAssignments
+                this.state.currentUnitId, 
+                this.state.year, 
+                this.state.month, 
+                this.state.scheduleData.assignments,
+                this.state.scheduleData.prevAssignments
             );
+
             this.versionsModal.hide();
             this.renderGrid();
             this.updateScoreDisplay();
+            
             alert(`✅ 已成功套用版本 ${selected.id}！`);
-        } catch(e) { console.error(e); alert("套用失敗: " + e.message); } finally { if(loading) loading.style.display = 'none'; }
+        } catch(e) {
+            console.error(e);
+            alert("套用失敗: " + e.message);
+        } finally {
+            if(loading) loading.style.display = 'none';
+        }
     }
 }
