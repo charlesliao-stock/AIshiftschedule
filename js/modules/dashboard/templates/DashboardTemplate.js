@@ -21,12 +21,12 @@ export const DashboardTemplate = {
                                 </select>
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label small fw-bold">2. 篩選角色</label>
+                                <label class="form-label small fw-bold">2. 篩選權限角色</label>
                                 <select id="admin-role-filter" class="form-select" disabled>
                                     <option value="" selected>請先選單位</option>
-                                    <option value="unit_manager">單位主管 (HN)</option>
-                                    <option value="unit_scheduler">排班者</option>
-                                    <option value="nurse">一般人員 (N)</option>
+                                    <option value="unit_manager">單位主管 (Manager)</option>
+                                    <option value="unit_scheduler">排班者 (Scheduler)</option>
+                                    <option value="general_staff">一般人員</option>
                                 </select>
                             </div>
                             <div class="col-md-4">
@@ -72,7 +72,7 @@ export const DashboardTemplate = {
                                 <h3 class="fw-bold text-dark mb-0" id="total-staff">--</h3>
                             </div>
                             <div class="icon-circle bg-green-100 text-success rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px;">
-                                <i class="fas fa-user-nurse fa-lg"></i>
+                                <i class="fas fa-user-friends fa-lg"></i>
                             </div>
                         </div>
                     </div>
@@ -81,7 +81,7 @@ export const DashboardTemplate = {
         `;
     },
 
-    // 2. 單位主管視圖 (含退出按鈕)
+    // ... (renderManager, renderUser 保持不變，無需修改) ...
     renderManager(isImpersonating) {
         const exitBtn = isImpersonating ? `
             <button id="btn-exit-impersonate" class="btn btn-danger btn-sm shadow ms-3 animate__animated animate__pulse animate__infinite">
@@ -136,7 +136,6 @@ export const DashboardTemplate = {
         `;
     },
 
-    // 3. 一般使用者視圖 (含退出按鈕)
     renderUser(unitId, isImpersonating) {
         const exitBtn = isImpersonating ? `
             <button id="btn-exit-impersonate" class="btn btn-danger btn-sm shadow ms-3 animate__animated animate__pulse animate__infinite">
