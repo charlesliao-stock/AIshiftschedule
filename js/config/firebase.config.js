@@ -1,4 +1,3 @@
-// js/config/firebase.config.js
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { 
     getFirestore, 
@@ -28,26 +27,28 @@ const firebaseConfig = {
     appId: "1:561144664580:web:3d4397a5cbd7f788b1db51",
     measurementId: "G-V0DBP9RZ7P"
 };
-// 初始化 App
+
+// 1. 先宣告變數，確保 export 時變數存在
 let app;
 let db;
 let auth;
 
+// 2. 嘗試初始化
 try {
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
-    console.log("Firebase Config Loaded, DB:", db); 
+    console.log("✅ Firebase Config Initialized: Auth & DB ready");
 } catch (error) {
-    console.error("Firebase Init Error:", error);
+    console.error("❌ Firebase Config Init Error:", error);
 }
 
-// ✅ 關鍵：匯出所有需要的 Firestore 函式，讓 Service 可以使用
+// 3. 統一匯出 (這就是其他檔案 import { auth } 的來源)
 export { 
     app, 
     db, 
     auth,
-    // 匯出 Firestore 功能函式
+    // Firestore helpers 導出供 Service 使用
     collection, 
     doc, 
     getDoc, 
