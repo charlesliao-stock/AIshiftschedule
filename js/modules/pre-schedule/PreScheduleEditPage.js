@@ -20,6 +20,10 @@ export class PreScheduleEditPage {
         
         this.editingPrefUid = null;
         this.prefModal = null;
+
+        // ✅ 新增：排序狀態
+        this.sortKey = 'rank'; // 預設依職級排序
+        this.sortAsc = true;   // 預設升冪
     }
 
     async render() {
@@ -32,8 +36,8 @@ export class PreScheduleEditPage {
             .schedule-table-container { overflow-x: auto; width: 100%; }
             .schedule-table { width: 100%; table-layout: auto; font-size: 0.8rem; }
             .schedule-table th, .schedule-table td { padding: 2px 1px !important; white-space: nowrap; vertical-align: middle; text-align: center; }
-            .col-staff-id { width: 50px; max-width: 50px; overflow: hidden; }
-            .col-name { width: 70px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; text-align: left; padding-left: 4px !important; }
+            .col-staff-id { width: 50px; max-width: 50px; overflow: hidden; cursor: pointer; } /* ✅ 設為可點擊 */
+            .col-name { width: 70px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; text-align: left; padding-left: 4px !important; cursor: pointer; } /* ✅ 設為可點擊 */
             .col-note { width: 25px; max-width: 25px; }
             .col-pref { width: 90px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
             .col-date { min-width: 24px; width: 24px; } 
@@ -44,6 +48,8 @@ export class PreScheduleEditPage {
             #context-menu .dropdown-item { padding: 0.25rem 1rem; font-size: 0.9rem; cursor: pointer; }
             #context-menu .dropdown-item:hover { background-color: #f8f9fa; }
             .btn-group-nowrap { white-space: nowrap; flex-wrap: nowrap !important; }
+            /* ✅ 新增：排序箭頭樣式 */
+            .sort-icon { font-size: 0.7rem; margin-left: 2px; color: #666; }
         </style>
         `;
 
@@ -69,7 +75,7 @@ export class PreScheduleEditPage {
 
                 <div class="alert alert-info py-1 px-2 small mb-2 d-flex align-items-center">
                     <i class="fas fa-info-circle me-2"></i>
-                    <span>提示：灰色區塊為上月資料 (可點擊修改)。支援左鍵或右鍵開啟選單。</span>
+                    <span>提示：點擊表頭「職編」或「姓名」可排序。灰色區塊為上月資料。</span>
                 </div>
 
                 <div class="card shadow-sm border-0">
@@ -133,7 +139,44 @@ export class PreScheduleEditPage {
         await this.loadData();
     }
 
-    // ✅ 重大修正：優先讀取 Snapshot，解決人員不同步與跨單位問題
+    // ✅ 新增：處理排序點擊
+    sortStaff(key) {
+        if (this.sortKey === key) {
+            this.sortAsc = !this.sortAsc; // 切換升降冪
+        } else {
+            this.sortKey = key;
+            this.sortAsc = true; // 新欄位預設升冪
+        }
+        this.applySort();
+        this.renderTable();
+    }
+
+    // ✅ 新增：執行排序邏輯
+    applySort() {
+        this.staffList.sort((a, b) => {
+            let valA, valB;
+            
+            if (this.sortKey === 'staffId') {
+                valA = a.staffId || '';
+                valB = b.staffId || '';
+            } else if (this.sortKey === 'name') {
+                valA = a.name || '';
+                valB = b.name || '';
+            } else {
+                // 預設 (rank)：先比職級，再比職編
+                const rankA = a.rank || 'Z';
+                const rankB = b.rank || 'Z';
+                if (rankA !== rankB) return this.sortAsc ? rankA.localeCompare(rankB) : rankB.localeCompare(rankA);
+                return (a.staffId || '').localeCompare(b.staffId || '');
+            }
+
+            // 通用字串/數字比較
+            if (valA < valB) return this.sortAsc ? -1 : 1;
+            if (valA > valB) return this.sortAsc ? 1 : -1;
+            return 0;
+        });
+    }
+
     async loadData() {
         try {
             this.scheduleData = await PreScheduleService.getPreScheduleById(this.scheduleId);
@@ -141,29 +184,22 @@ export class PreScheduleEditPage {
             
             this.unitData = await UnitService.getUnitById(this.scheduleData.unitId);
             
-            // 決定使用哪一份人員名單
             let finalStaffList = [];
 
             if (this.scheduleData.staffSnapshots && this.scheduleData.staffSnapshots.length > 0) {
-                // 1. 最優先：使用設定檔中儲存的快照 (包含跨單位人員)
                 finalStaffList = this.scheduleData.staffSnapshots;
             } else if (this.scheduleData.staffIds && this.scheduleData.staffIds.length > 0) {
-                // 2. 次優先：若無快照但有 ID 列表 (舊資料)，則依 ID 抓取最新資料
                 const promises = this.scheduleData.staffIds.map(uid => userService.getUserData(uid));
                 const users = await Promise.all(promises);
-                finalStaffList = users.filter(u => u); // 過濾掉找不到的人
+                finalStaffList = users.filter(u => u);
             } else {
-                // 3. 最後手段：抓取該單位目前所有人員 (不建議，會漏掉支援者)
                 finalStaffList = await userService.getUnitStaff(this.scheduleData.unitId);
             }
 
-            // 排序 (職級 > 職編)
-            this.staffList = finalStaffList.sort((a, b) => {
-                const rankA = a.rank || 'Z';
-                const rankB = b.rank || 'Z';
-                if (rankA !== rankB) return rankA.localeCompare(rankB);
-                return (a.staffId || '').localeCompare(b.staffId || '');
-            });
+            this.staffList = finalStaffList;
+            
+            // ✅ 改用 applySort() 進行排序，不再寫死
+            this.applySort();
 
             document.getElementById('page-title').innerHTML = `<i class="fas fa-edit me-2"></i>${this.unitData.unitName} - ${this.scheduleData.year}/${this.scheduleData.month}`;
             this.updateStatusBadge(this.scheduleData.status);
@@ -179,6 +215,7 @@ export class PreScheduleEditPage {
         }
     }
 
+    // ... (ensureHistoryData 保持不變) ...
     async ensureHistoryData() {
         const currentYear = this.scheduleData.year;
         const currentMonth = this.scheduleData.month;
@@ -189,7 +226,6 @@ export class PreScheduleEditPage {
         this.prevMonthDays = new Date(py, pm, 0).getDate();
         this.historyRange = [];
         for (let i = 5; i >= 0; i--) { this.historyRange.push(this.prevMonthDays - i); }
-        
         if (this.scheduleData.history && Object.keys(this.scheduleData.history).length > 0) {
             this.historyData = this.scheduleData.history;
         } else {
@@ -205,23 +241,31 @@ export class PreScheduleEditPage {
                     });
                 }
                 this.isDirty = true;
-            } catch (e) { 
-                this.historyData = {}; 
-                this.staffList.forEach(s => this.historyData[s.uid] = {}); 
-            }
+            } catch (e) { this.historyData = {}; this.staffList.forEach(s => this.historyData[s.uid] = {}); }
         }
     }
 
+    // ✅ 修改：Render Table 加入點擊事件與箭頭顯示
     renderTable() {
         const daysInMonth = new Date(this.scheduleData.year, this.scheduleData.month, 0).getDate();
         const submissions = this.scheduleData.submissions || {};
         
+        // 輔助函式：取得箭頭
+        const getArrow = (key) => {
+            if (this.sortKey !== key) return '';
+            return this.sortAsc ? '<span class="sort-icon">▲</span>' : '<span class="sort-icon">▼</span>';
+        };
+
         let html = `
         <table class="table table-bordered table-sm text-center align-middle schedule-table user-select-none">
             <thead class="table-light sticky-top" style="z-index: 5;">
                 <tr>
-                    <th rowspan="2" class="col-staff-id">職編</th>
-                    <th rowspan="2" class="col-name">姓名</th>
+                    <th rowspan="2" class="col-staff-id" onclick="window.routerPage.sortStaff('staffId')" title="點擊排序">
+                        職編 ${getArrow('staffId')}
+                    </th>
+                    <th rowspan="2" class="col-name" onclick="window.routerPage.sortStaff('rank')" title="點擊依職級/姓名排序">
+                        姓名 ${getArrow('rank')}${getArrow('name')}
+                    </th>
                     <th rowspan="2" class="col-note">註</th>
                     <th rowspan="2" class="col-pref">偏好 <i class="fas fa-pen text-muted small"></i></th>
                     <th colspan="6" class="bg-secondary bg-opacity-10 border-end border-2">上月</th>
@@ -247,7 +291,6 @@ export class PreScheduleEditPage {
             const pref = sub.preferences || {};
             const history = this.historyData[uid] || {};
             
-            // 處理跨單位顯示
             let nameDisplay = staff.name;
             if (staff.unitId && staff.unitId !== this.scheduleData.unitId) {
                 nameDisplay += `<span class="text-danger ms-1" style="font-size:0.7em">(${staff.unitId})</span>`;
@@ -300,7 +343,7 @@ export class PreScheduleEditPage {
         document.getElementById('schedule-container').innerHTML = html;
     }
 
-    // ... (其餘所有方法 renderShiftBadge, getWeekName, updateStatusBadge, handleCellClick, applyShift, openPrefModal, savePreferences, saveData, goToAutoSchedule 保持不變) ...
+    // ... (其餘所有方法保持不變，為節省篇幅省略) ...
     renderShiftBadge(code) {
         if (!code) return '';
         if (code.startsWith('NO_')) return `<span class="badge border border-danger text-danger bg-light" style="padding:1px 2px; font-size:0.7rem;">x${code.replace('NO_', '')}</span>`;
