@@ -12,19 +12,14 @@ export class AutoScheduler {
         const startTime = Date.now();
 
         try {
-            const db = firebaseService.getDb();
-            // 讀取系統設定 (用於週起始日等)
-            let systemSettings = { weekStartDay: 1 }; 
-            // 實務上可 await getDoc...
-
             // 1. 選擇策略引擎
             let StrategyEngine = BalanceStrategy;
             if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
             if (strategyCode === 'C') StrategyEngine = PatternStrategy;
 
-            // 2. 準備 Context
+            // 2. 準備 Context (含歷史回溯與長假判斷)
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
-            context.StrategyEngine = StrategyEngine; // 注入策略
+            context.StrategyEngine = StrategyEngine;
 
             // 3. 預填 (包班/預班)
             this.prefillFixedShifts(context);
@@ -48,47 +43,88 @@ export class AutoScheduler {
         const assignments = {};
         const preferences = {};
         const whitelists = {};
-        const stats = {}; // 追蹤每人各班別累計數
+        const stats = {}; 
+        const lastMonthConsecutive = {}; // 記錄每人上月底已連續上班天數
+        const lastMonthLastShift = {};   // 記錄上月最後一天的班別
+
+        // 讀取全域設定
+        const rules = unitSettings.settings?.rules || {};
+        const globalMax = rules.maxConsecutiveWork || 6;
+        const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
+
+        // 1. 解析歷史資料 (上個月最後幾天)
+        // preScheduleData.assignments 結構範例: { "uid1": { "25": "D", "26": "N", ... "30": "N" } }
+        const historyAssignments = preScheduleData.assignments || {};
 
         staffList.forEach(s => {
             const uid = s.uid || s.id;
             assignments[uid] = {};
             stats[uid] = { D:0, E:0, N:0, OFF:0 };
             
-            // --- 核心邏輯 I: 白名單預處理 ---
-            // 讀取靜態權限
+            // --- A. 歷史回溯 (計算 1號 是否會變成第 7 天) ---
+            const userHistory = historyAssignments[uid] || {};
+            const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a); // 倒序 30, 29, 28...
+            
+            if (days.length > 0) {
+                const lastDay = days[0];
+                lastMonthLastShift[uid] = userHistory[lastDay] || 'OFF';
+                
+                // 回溯計算連續上班天數
+                let cons = 0;
+                for (let d of days) {
+                    const shift = userHistory[d];
+                    if (shift && shift !== 'OFF' && shift !== 'M_OFF') {
+                        cons++;
+                    } else {
+                        break; // 遇到休假就停止
+                    }
+                }
+                lastMonthConsecutive[uid] = cons;
+            } else {
+                lastMonthLastShift[uid] = 'OFF';
+                lastMonthConsecutive[uid] = 0;
+            }
+            
+            // 將上月最後一天狀態寫入第 0 天，供 RuleEngine 判斷銜接
+            assignments[uid][0] = lastMonthLastShift[uid];
+
+            // --- B. 決定該員本月連續上班上限 ---
+            // 若開啟長假例外 且 該員是長假身分 -> 上限 7，否則依全域設定
+            let myMaxConsecutive = globalMax;
+            if (allowLongLeave && s.isLongLeave) {
+                myMaxConsecutive = 7;
+            }
+            // 將計算後的上限注入 constraints，供 RuleEngine 使用
+            if (!s.constraints) s.constraints = {};
+            s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
+
+
+            // --- C. 白名單預處理 ---
             const canFixed = s.constraints?.allowFixedShift; 
-            const lane = s.constraints?.rotatingLane || 'DN'; // DN(白大) 或 DE(白小)
-
-            // 讀取當月動態選擇 (從 PreSchedule 來的 preferences)
+            const lane = s.constraints?.rotatingLane || 'DN'; 
             const sub = preScheduleData.submissions?.[uid] || {};
-            const monthlyChoice = sub.preferences?.batch; // 'N', 'E', or null
+            const monthlyChoice = sub.preferences?.batch; 
 
-            let allowed = ['D', 'N', 'OFF']; // 預設 C組 (白+大)
+            let allowed = ['D', 'N', 'OFF']; 
 
-            // 1. 特殊身分
             if (s.constraints?.isPregnant) {
                 allowed = ['D', 'OFF'];
             }
-            // 2. 包班 (需有權限 + 當月有選)
             else if (canFixed && monthlyChoice === 'N') {
                 allowed = ['N', 'OFF'];
             }
             else if (canFixed && monthlyChoice === 'E') {
                 allowed = ['E', 'OFF'];
             }
-            // 3. 輪班組別
             else if (lane === 'DE') {
                 allowed = ['D', 'E', 'OFF'];
             }
-            // 預設 DN
             else {
                 allowed = ['D', 'N', 'OFF'];
             }
-
             whitelists[uid] = allowed;
             
-            // 填入預班 (鎖定)
+            // 填入預班
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     assignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w);
@@ -101,13 +137,6 @@ export class AutoScheduler {
             };
         });
 
-        // 載入上個月最後一天
-        const history = preScheduleData.assignments || {};
-        staffList.forEach(s => {
-            const uid = s.uid || s.id;
-            assignments[uid][0] = 'OFF'; // 簡化，應從 history 讀取
-        });
-
         return {
             year: currentSchedule.year,
             month: currentSchedule.month,
@@ -117,7 +146,8 @@ export class AutoScheduler {
             preferences,
             whitelists,
             stats,
-            shiftDefs: unitSettings.settings?.shifts || [{code:'D', startTime:'08:00', endTime:'16:00'}, {code:'E', startTime:'16:00', endTime:'00:00'}, {code:'N', startTime:'00:00', endTime:'08:00'}],
+            lastMonthConsecutive, // 傳入 Context
+            shiftDefs: unitSettings.settings?.shifts || [],
             staffReq: unitSettings.staffRequirements || {},
             logs: [],
             startTime: Date.now(),
@@ -126,10 +156,8 @@ export class AutoScheduler {
     }
 
     static prefillFixedShifts(context) {
-        // 對於白名單只有 2 種 (Ex: N + OFF) 的人，若沒填 OFF，就填 N
         Object.entries(context.whitelists).forEach(([uid, allowed]) => {
             const workingShift = allowed.find(s => s !== 'OFF');
-            // 若白名單只有 [Working, OFF] 兩項，且當天沒被預班鎖定，則填入
             if (allowed.length === 2 && workingShift) {
                 for (let d = 1; d <= context.daysInMonth; d++) {
                     if (!context.assignments[uid][d]) {
@@ -154,24 +182,18 @@ export class AutoScheduler {
 
     static async solveRecursive(day, list, idx, context) {
         if (idx >= list.length) return true;
-        
-        // 簡單的超時保護
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
 
         const staff = list[idx];
         const uid = staff.uid;
-        
-        // 根據白名單 + 策略評分
         const w = new Date(context.year, context.month - 1, day).getDay();
         
-        // 統計目前當天各班人數
         const currentCounts = {};
         context.staffList.forEach(s => {
             const sh = context.assignments[s.uid][day];
             if (sh && sh !== 'OFF') currentCounts[sh] = (currentCounts[sh]||0) + 1;
         });
 
-        // 評分
         let candidates = context.whitelists[uid].map(shift => ({
             shift,
             score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w)
@@ -180,30 +202,29 @@ export class AutoScheduler {
         for (const item of candidates) {
             const shift = item.shift;
             
-            // 嘗試填入
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
-            // 驗證規則
+            // 驗證規則 (傳入 context 中的歷史數據)
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], 
                 day, 
                 context.shiftDefs, 
-                { constraints: { minInterval11h: true } }, // 強制啟用間隔檢查
+                { constraints: { minInterval11h: true } }, 
                 staff.constraints,
-                context.assignments[uid][0], 0, day
+                context.assignments[uid][0], // 上月最後一班
+                context.lastMonthConsecutive[uid], // 上月連續天數
+                day
             );
 
             if (!valid.errors[day]) {
                 if (await this.solveRecursive(day, list, idx + 1, context)) return true;
             }
 
-            // 回溯
             context.stats[uid][shift]--;
             delete context.assignments[uid][day];
         }
 
-        // 若無解，暫填 OFF 以推進 (避免完全卡死)
         context.assignments[uid][day] = 'OFF';
         return true;
     }
