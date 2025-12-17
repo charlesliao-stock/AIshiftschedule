@@ -1,7 +1,6 @@
 import { RuleEngine } from "./RuleEngine.js";
 import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
 import { firebaseService } from "../../services/firebase/FirebaseService.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const MAX_RUNTIME = 30000;
 
@@ -44,16 +43,15 @@ export class AutoScheduler {
         const preferences = {};
         const whitelists = {};
         const stats = {}; 
-        const lastMonthConsecutive = {}; // 記錄每人上月底已連續上班天數
-        const lastMonthLastShift = {};   // 記錄上月最後一天的班別
-
+        const lastMonthConsecutive = {}; // 記錄每人上月底已連續上班天數 (決定1號能不能上)
+        
         // 讀取全域設定
         const rules = unitSettings.settings?.rules || {};
         const globalMax = rules.maxConsecutiveWork || 6;
         const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
 
-        // 1. 解析歷史資料 (上個月最後幾天)
-        // preScheduleData.assignments 結構範例: { "uid1": { "25": "D", "26": "N", ... "30": "N" } }
+        // 1. 解析歷史資料 (PreSchedule 提供的上月 assignments)
+        // 格式預期: { "uid1": { "25": "D", "26": "N", ... "30": "N" } }
         const historyAssignments = preScheduleData.assignments || {};
 
         staffList.forEach(s => {
@@ -61,40 +59,43 @@ export class AutoScheduler {
             assignments[uid] = {};
             stats[uid] = { D:0, E:0, N:0, OFF:0 };
             
-            // --- A. 歷史回溯 (計算 1號 是否會變成第 7 天) ---
+            // --- A. 歷史回溯邏輯 (Spec 1: 判斷 1號 是否為第 7 天) ---
             const userHistory = historyAssignments[uid] || {};
-            const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a); // 倒序 30, 29, 28...
+            // 取得所有日期並由大到小排序 (31, 30, 29...)
+            const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a);
             
+            let lastDayShift = 'OFF';
+            let cons = 0;
+
             if (days.length > 0) {
-                const lastDay = days[0];
-                lastMonthLastShift[uid] = userHistory[lastDay] || 'OFF';
+                const lastDayKey = days[0]; // 上月最後一天
+                lastDayShift = userHistory[lastDayKey] || 'OFF';
                 
-                // 回溯計算連續上班天數
-                let cons = 0;
+                // 往回追溯，計算連續上班天數
                 for (let d of days) {
                     const shift = userHistory[d];
                     if (shift && shift !== 'OFF' && shift !== 'M_OFF') {
                         cons++;
                     } else {
-                        break; // 遇到休假就停止
+                        break; // 一旦遇到 OFF 就停止計數
                     }
                 }
-                lastMonthConsecutive[uid] = cons;
-            } else {
-                lastMonthLastShift[uid] = 'OFF';
-                lastMonthConsecutive[uid] = 0;
             }
             
-            // 將上月最後一天狀態寫入第 0 天，供 RuleEngine 判斷銜接
-            assignments[uid][0] = lastMonthLastShift[uid];
+            // 將計算結果存入
+            lastMonthConsecutive[uid] = cons;
+            // 將上月最後一天狀態寫入第 0 天 (供 RuleEngine 判斷銜接)
+            assignments[uid][0] = lastDayShift;
 
-            // --- B. 決定該員本月連續上班上限 ---
-            // 若開啟長假例外 且 該員是長假身分 -> 上限 7，否則依全域設定
+
+            // --- B. 決定該員本月連續上班上限 (Spec 4: 長假例外) ---
+            // 若全域開啟例外 且 該員是長假身分 -> 上限自動設為 7
             let myMaxConsecutive = globalMax;
             if (allowLongLeave && s.isLongLeave) {
                 myMaxConsecutive = 7;
             }
-            // 將計算後的上限注入 constraints，供 RuleEngine 使用
+            
+            // 將計算後的上限注入 constraints (不汙染原始資料，僅本次運算有效)
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
@@ -146,7 +147,7 @@ export class AutoScheduler {
             preferences,
             whitelists,
             stats,
-            lastMonthConsecutive, // 傳入 Context
+            lastMonthConsecutive, // 傳入 Context 供遞迴使用
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq: unitSettings.staffRequirements || {},
             logs: [],
@@ -205,7 +206,7 @@ export class AutoScheduler {
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
-            // 驗證規則 (傳入 context 中的歷史數據)
+            // 驗證規則 (傳入 AutoScheduler 計算出的上月連續天數)
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], 
                 day, 
