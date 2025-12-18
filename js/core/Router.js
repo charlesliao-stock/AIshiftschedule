@@ -104,7 +104,20 @@ class Router {
         }
         else if (PageClassOrInstance) {
             if (typeof PageClassOrInstance === 'function' && /^\s*class\s+/.test(PageClassOrInstance.toString())) {
-                pageInstance = new PageClassOrInstance();
+                // 檢查是否為需要 unitId 的頁面
+                const unitPages = ['/unit/staff/list', '/unit/staff/create', '/unit/settings/shifts', '/unit/settings/rules', '/unit/settings/groups', '/schedule/list', '/schedule/edit', '/schedule/my', '/pre-schedule/manage', '/pre-schedule/edit', '/pre-schedule/submit', '/swaps/review', '/swaps/apply', '/stats/unit', '/stats/personal'];
+                
+                if (unitPages.includes(purePath) && currentUser && currentUser.unitId) {
+                    pageInstance = new PageClassOrInstance(currentUser.unitId);
+                } else if (unitPages.includes(purePath) && currentUser && !currentUser.unitId) {
+                    // 如果是單位頁面但沒有 unitId，導向儀表板或錯誤頁面
+                    console.error(`Router Error: Unit page ${purePath} requires unitId, but currentUser.unitId is missing.`);
+                    this.navigate('/dashboard');
+                    return;
+                } else {
+                    // 其他頁面或不需要參數的頁面
+                    pageInstance = new PageClassOrInstance(currentUser); // 預設傳入 currentUser
+                }
             } else {
                 pageInstance = PageClassOrInstance;
             }
