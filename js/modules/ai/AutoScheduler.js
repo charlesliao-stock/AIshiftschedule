@@ -1,12 +1,12 @@
 import { RuleEngine } from "./RuleEngine.js";
 import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
 
-const MAX_RUNTIME = 60000; // 延長至 60 秒以應對回溯計算
+const MAX_RUNTIME = 60000;
 
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Strict Whitelist + Last Day Fix)`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
@@ -308,14 +308,13 @@ export class AutoScheduler {
                     for (const staff of candidates) {
                         if (trimmed >= excess) break;
                         
-                        // ✅ 包班保護：若白名單鎖死為 [Sh, OFF]，則不應被一般邏輯強制修剪
-                        // 但實際上修剪成 OFF 對包班者也是合法的 (E -> OFF)
-                        // 這裡為了讓包班者盡量上班，可視情況調整，但目前規格允許包班者休假
-                        
                         // 檢查預班鎖定 (不可動)
-                        // 若是預班指定的班別，也不動
-                        const subWishes = preScheduleData.submissions?.[staff.uid]?.wishes || {};
-                        if (subWishes[day] === sh) continue; 
+                        const subWishes = context.preScheduledOffs[staff.uid] || {};
+                        if (subWishes[day]) continue; 
+
+                        // 包班者不動：白名單只有 [Sh, OFF]
+                        const allowed = context.whitelists[staff.uid];
+                        if (allowed.length === 2 && allowed.includes(sh)) continue;
 
                         context.assignments[staff.uid][day] = 'OFF';
                         context.stats[staff.uid][sh]--;
@@ -346,12 +345,8 @@ export class AutoScheduler {
                     let filled = 0;
                     for (const staff of candidates) {
                         if (filled >= shortage) break;
-                        
                         if (context.preScheduledOffs[staff.uid]?.[day]) continue; 
-                        
-                        // ✅ 白名單檢查：這會自然擋下包班者去補其他班
-                        // 例如包 E 者，白名單是 ['E', 'OFF']，這裡若缺 N，includes('N') 為 false，跳過
-                        if (!context.whitelists[staff.uid].includes(sh)) continue;
+                        if (!context.whitelists[staff.uid].includes(sh)) continue; // 白名單檢查
 
                         const valid = RuleEngine.validateStaff(
                             { ...context.assignments[staff.uid], [day]: sh }, 
