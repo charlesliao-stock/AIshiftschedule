@@ -7,6 +7,10 @@ export class RuleSettings {
         this.unitSettings = null;
     }
 
+    async init() {
+        await this.loadSettings();
+    }
+
     async loadSettings() {
         this.unitSettings = await UnitService.getUnitSettings(this.unitId);
         if (!this.unitSettings.rules) this.unitSettings.rules = {};
@@ -16,6 +20,10 @@ export class RuleSettings {
     }
 
     render() {
+        // 修正：增加防禦性檢查，避免在 unitSettings 尚未載入時讀取其屬性
+        if (!this.unitSettings) {
+            return `<div class="modal-body text-center py-5">載入中...</div>`;
+        }
         const rules = this.unitSettings.rules;
         const weights = this.unitSettings.strategyWeights;
         const scoringCategories = AI_SCORING_CONFIG.SCORING_CATEGORIES;
