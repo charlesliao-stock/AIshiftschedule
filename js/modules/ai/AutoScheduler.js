@@ -1,4 +1,3 @@
-// ✅ 修正引用路徑：同層級引用
 import { RuleEngine } from "./RuleEngine.js";
 import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
 
@@ -7,7 +6,7 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Monthly Limit Check)`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Monthly Check Enabled)`);
         const startTime = Date.now();
 
         try {
@@ -49,13 +48,14 @@ export class AutoScheduler {
         const preScheduledOffs = {}; 
 
         const rules = unitSettings.settings?.rules || {};
+        const strategyWeights = unitSettings.settings?.strategyWeights || {}; 
+        
         const globalMax = rules.maxConsecutiveWork || 6;
         const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
         const rebalanceLoop = rules.rebalanceLoop || 3;
         
-        // ✅ 讀取月班種上限 (預設 2)
+        // 讀取月班種上限
         const monthlyLimit = rules.constraints?.monthlyShiftLimit || 2;
-        
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
         staffList.forEach(s => {
@@ -64,7 +64,6 @@ export class AutoScheduler {
             stats[uid] = { D:0, E:0, N:0, OFF:0 };
             preScheduledOffs[uid] = {}; 
 
-            // 歷史回溯
             const userHistory = historyAssignments[uid] || {};
             const days = Object.keys(userHistory).map(Number).sort((a, b) => b - a);
             let lastDayShift = 'OFF';
@@ -136,7 +135,8 @@ export class AutoScheduler {
             lastMonthConsecutive,
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq,
-            rules: { ...rules, rebalanceLoop, monthlyLimit }, // 傳入 monthlyLimit
+            rules: { ...rules, rebalanceLoop, monthlyLimit }, 
+            weights: strategyWeights, 
             logs: [],
             startTime: Date.now()
         };
@@ -194,7 +194,7 @@ export class AutoScheduler {
         for (const item of candidates) {
             const shift = item.shift;
             
-            // ✅ 關鍵修正：檢查月班種上限 (若超過則跳過此班別)
+            // 檢查月班種上限
             if (RuleEngine.willViolateMonthlyLimit(context.assignments[uid], shift, day, context.rules.monthlyLimit)) {
                 continue;
             }
@@ -299,7 +299,7 @@ export class AutoScheduler {
                         if (context.preScheduledOffs[staff.uid]?.[day]) continue; 
                         if (!context.whitelists[staff.uid].includes(sh)) continue; 
 
-                        // ✅ 關鍵修正：補人時也要檢查月班種上限
+                        // 補人時也要檢查月班種
                         if (RuleEngine.willViolateMonthlyLimit(context.assignments[staff.uid], sh, day, context.rules.monthlyLimit)) {
                             continue;
                         }
