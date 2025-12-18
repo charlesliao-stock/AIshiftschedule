@@ -1,12 +1,12 @@
 import { RuleEngine } from "./RuleEngine.js";
-import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
+import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js"; // 移除 DEFAULT_AI_WEIGHTS 匯入
 
 const MAX_RUNTIME = 60000;
 
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Fix ReferenceError)`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
@@ -14,7 +14,9 @@ export class AutoScheduler {
             if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
             if (strategyCode === 'C') StrategyEngine = PatternStrategy;
 
-            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
+            // 修正: 將 strategyWeights 傳入 prepareContext
+            const strategyWeights = unitSettings.settings?.strategyWeights || {}; 
+            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode, strategyWeights);
             context.StrategyEngine = StrategyEngine;
 
             this.calculateLeaveQuotas(context);
@@ -41,7 +43,7 @@ export class AutoScheduler {
         }
     }
 
-    static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode) {
+    static prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode, strategyWeights) {
         const assignments = {};
         const preferences = {};
         const whitelists = {};
@@ -52,7 +54,6 @@ export class AutoScheduler {
 
         const rules = unitSettings.settings?.rules || {};
         const constraints = rules.constraints || {};
-        const strategyWeights = unitSettings.settings?.strategyWeights || {}; 
         
         const globalMax = rules.maxConsecutiveWork || 6;
         const allowLongLeave = constraints.allowLongLeaveException || false;
@@ -104,7 +105,7 @@ export class AutoScheduler {
                 allowed = ['N', 'OFF'];
             } else if (!monthlyBatch && staticFixed === 'E') {
                 allowed = ['E', 'OFF'];
-            } else if (!monthlyBatch && staticFixed === 'D') { // <-- 新增對固定 D 班的處理
+            } else if (!monthlyBatch && staticFixed === 'D') { 
                 allowed = ['D', 'OFF'];
             } else {
                 allowed = ['D', 'E', 'N', 'OFF'];
@@ -122,7 +123,7 @@ export class AutoScheduler {
             preferences[uid] = {
                 p1: pref.priority1,
                 p2: pref.priority2,
-                p3: pref.priority3 // 確保 p3 存在，即使為 null/undefined
+                p3: pref.priority3 
             };
         });
 
@@ -140,8 +141,8 @@ export class AutoScheduler {
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq,
             rules: { ...rules, constraints, rebalanceLoop, monthlyLimit }, 
-            weights: strategyWeights, 
-            preScheduleData, // ✅ 修正：將 preScheduleData 放入 context
+            weights: strategyWeights, // 傳入 strategyWeights
+            preScheduleData, 
             logs: [],
             startTime: Date.now()
         };
@@ -172,6 +173,13 @@ export class AutoScheduler {
         });
     }
 
+    static shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+    }
+
     static async solveDay(day, context) {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
         const pending = context.staffList.filter(s => !context.assignments[s.uid][day]);
@@ -193,7 +201,7 @@ export class AutoScheduler {
 
         let candidates = context.whitelists[uid].map(shift => ({
             shift,
-            score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w)
+            score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w, context.weights)
         })).sort((a, b) => b.score - a.score);
 
         for (const item of candidates) {
@@ -214,10 +222,6 @@ export class AutoScheduler {
             );
 
             if (!valid.errors[day]) {
-                // 2. 檢查每日人力需求是否被滿足 (軟性約束，但在此階段作為硬性約束處理)
-                // 註：這部分檢查應該在 solveDay 外部的 retroactiveBalance 中處理，
-                // 但為了確保硬性規則被遵守，這裡必須檢查 RuleEngine 的結果。
-                
                 if (await this.solveRecursive(day, list, idx + 1, context)) return true;
             }
 
@@ -225,8 +229,27 @@ export class AutoScheduler {
             delete context.assignments[uid][day];
         }
         
-        context.assignments[uid][day] = 'OFF';
-        return true;
+        // 嘗試將員工排為 OFF
+        if (context.whitelists[uid].includes('OFF')) {
+            context.assignments[uid][day] = 'OFF';
+            context.stats[uid].OFF = (context.stats[uid].OFF||0) + 1;
+
+            // 檢查硬性規則 (連續工作天數等)
+            const valid = RuleEngine.validateStaff(
+                context.assignments[uid], day, context.shiftDefs, 
+                context.rules, 
+                staff.constraints, context.assignments[uid][0], context.lastMonthConsecutive[uid], day
+            );
+
+            if (!valid.errors[day]) {
+                if (await this.solveRecursive(day, list, idx + 1, context)) return true;
+            }
+
+            context.stats[uid].OFF--;
+            delete context.assignments[uid][day];
+        }
+
+        return false;
     }
 
     static retroactiveBalance(day, context) {
@@ -262,88 +285,58 @@ export class AutoScheduler {
                 const req = context.staffReq[sh]?.[w] || 0;
                 if (counts[sh] > req) {
                     const excess = counts[sh] - req;
-                    // 修正: 確保不會將所有超編人員都轉為 OFF，要考慮當日 OFF 的需求
-                    const offReq = context.staffList.length - (context.staffReq.D[w]||0) - (context.staffReq.E[w]||0) - (context.staffReq.N[w]||0);
+                    const maxOff = context.staffList.length - (context.staffReq.D[w]||0) - (context.staffReq.E[w]||0) - (context.staffReq.N[w]||0);
                     const currentOff = staffByShift.OFF.length;
-                    const maxToTrim = Math.max(0, offReq - currentOff);
+                    const maxToTrim = Math.max(0, maxOff - currentOff);
                     const actualExcess = Math.min(excess, maxToTrim);
-                    const candidates = staffByShift[sh].sort((a, b) => {
-                        const defA = context.targetAvgOff - context.stats[a.uid].OFF;
-                        const defB = context.targetAvgOff - context.stats[b.uid].OFF;
-                        return defB - defA; 
-                    });
 
-                    let trimmed = 0;
-                    for (const staff of candidates) {
-                        if (trimmed >= actualExcess) break;
-                        
-                        // ✅ 修正：改用 context.preScheduleData
-                        const subWishes = context.preScheduleData.submissions?.[staff.uid]?.wishes || {};
-                        if (subWishes[day] === sh) continue; 
+                    if (actualExcess > 0) {
+                        const candidates = staffByShift[sh].sort((a, b) => {
+                            const defA = context.targetAvgOff - context.stats[a.uid].OFF;
+                            const defB = context.targetAvgOff - context.stats[b.uid].OFF;
+                            return defA - defB; // 優先將 OFF 數最少的員工轉為 OFF
+                        });
 
-                        const allowed = context.whitelists[staff.uid];
-                        if (allowed.length === 2 && allowed.includes(sh)) continue;
-
-                        context.assignments[staff.uid][day] = 'OFF';
-                        context.stats[staff.uid][sh]--;
-                        context.stats[staff.uid].OFF++;
-                        
-                        staffByShift.OFF.push(staff);
-                        trimmed++;
-                        changed = true;
+                        for (let i = 0; i < actualExcess; i++) {
+                            const staff = candidates[i];
+                            if (staff) {
+                                context.assignments[staff.uid][day] = 'OFF';
+                                context.stats[staff.uid][sh]--;
+                                context.stats[staff.uid].OFF++;
+                                staffByShift.OFF.push(staff);
+                                changed = true;
+                            }
+                        }
                     }
                 }
             });
 
-            // Fill Shortage
+            // Fill Deficit
             shifts.forEach(sh => {
                 const req = context.staffReq[sh]?.[w] || 0;
-                let current = 0;
-                context.staffList.forEach(s => { if(context.assignments[s.uid][day] === sh) current++; });
+                if (counts[sh] < req) {
+                    const deficit = req - counts[sh];
+                    const candidates = staffByShift.OFF.filter(s => context.whitelists[s.uid].includes(sh))
+                        .sort((a, b) => {
+                            const defA = context.stats[a.uid].OFF - context.targetAvgOff;
+                            const defB = context.stats[b.uid].OFF - context.targetAvgOff;
+                            return defB - defA; // 優先將 OFF 數最多的員工轉為工作班
+                        });
 
-                if (current < req) {
-                    const shortage = req - current;
-                    const candidates = staffByShift.OFF.sort((a, b) => {
-                        const defA = context.targetAvgOff - context.stats[a.uid].OFF;
-                        const defB = context.targetAvgOff - context.stats[b.uid].OFF;
-                        return defA - defB; 
-                    });
-
-                    let filled = 0;
-                    for (const staff of candidates) {
-                        if (filled >= shortage) break;
-                        if (context.preScheduledOffs[staff.uid]?.[day]) continue; 
-                        if (!context.whitelists[staff.uid].includes(sh)) continue; 
-
-                        if (RuleEngine.willViolateMonthlyLimit(context.assignments[staff.uid], sh, day, context.rules.monthlyLimit)) {
-                            continue;
+                    for (let i = 0; i < deficit; i++) {
+                        const staff = candidates[i];
+                        if (staff) {
+                            context.assignments[staff.uid][day] = sh;
+                            context.stats[staff.uid].OFF--;
+                            context.stats[staff.uid][sh]++;
+                            staffByShift.OFF = staffByShift.OFF.filter(s => s.uid !== staff.uid);
+                            changed = true;
                         }
-
-                        const valid = RuleEngine.validateStaff(
-                            { ...context.assignments[staff.uid], [day]: sh }, 
-                            day, context.shiftDefs, 
-                            context.rules, 
-                            staff.constraints, context.assignments[staff.uid][0], context.lastMonthConsecutive[staff.uid], day
-                        );
-                        if (valid.errors[day]) continue;
-
-                        context.assignments[staff.uid][day] = sh;
-                        context.stats[staff.uid].OFF--;
-                        context.stats[staff.uid][sh]++;
-                        filled++;
-                        changed = true;
                     }
                 }
             });
 
             if (!changed) break;
-        }
-    }
-
-    static shuffleArray(arr) {
-        for (let i = arr.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [arr[i], arr[j]] = [arr[j], arr[i]];
         }
     }
 }

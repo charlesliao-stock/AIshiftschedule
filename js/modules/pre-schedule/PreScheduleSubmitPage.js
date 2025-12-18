@@ -218,7 +218,7 @@ export class PreScheduleSubmitPage {
             const currentMix = document.querySelector('input[name="monthlyMix"]:checked')?.value || '2';
             this.updatePriorityVisibility(currentMix);
         }
-        
+
         if(disabled) {
             document.querySelectorAll('#preference-container input, #preference-container select').forEach(el => el.disabled = true);
         }

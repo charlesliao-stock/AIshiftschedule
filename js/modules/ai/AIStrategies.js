@@ -1,69 +1,61 @@
 // js/modules/ai/AIStrategies.js
 
-const WEIGHTS = {
-    // 滿足人力需求
-    NEED_MET: 0,          
-    NEED_MISSING: 3000,   // 缺人 (高分，但低於 P1，確保在策略 B 中願望優先)
-    OVER_STAFFED: -10,    // 微小扣分，允許超編
-    
-    // 員工偏好
-    PREF_P1: 5000,        // P1 權重極高
-    PREF_P2: 2500,        // P2 權重次之
-    PREF_NO: -9999,       // 勿排 (絕對禁止)
-    NOT_IN_PREF: -5000,   // ✅ 新增：排了「非志願」的班 (針對策略 B)
-    
-    // 平衡性
-    BALANCE_OVER_AVG: -50, 
-    
-    // 連續性
-    CONTINUITY_BONUS: 500, 
-    PATTERN_PENALTY: -200   
-};
-
+// 策略類別將從外部配置中讀取權重
 export class BalanceStrategy {
-    static calculateScore(uid, shift, day, context, currentCounts, w) {
+    static calculateScore(uid, shift, day, context, currentCounts, w, weights) {
         let score = 100;
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
         // 1. 人力需求 (權重較高，追求填滿)
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
-            else score += WEIGHTS.OVER_STAFFED;
+            // 這裡的權重應該來自於 AutoScheduler 傳入的 weights
+            if (current < shiftReq) score += weights.coverage; // 覆蓋率
+            else score += weights.overwork; // 超額上班懲罰
         }
 
-        // 2. 基礎偏好
+        // 2. 班別種類平衡 (使用 shiftBalance 權重)
+        // 由於 shiftBalance 是一個全域評分，這裡不適合直接加分，而是應該在最終評分時計算。
+        // 這裡可以加入一個基礎的偏好滿足度，以確保能排入員工偏好的班別
         const prefs = context.preferences[uid] || {};
-        if (prefs.p1 === shift) score += 500; // 有加分但不多
+        if (prefs.p1 === shift) score += 50; // 基礎 P1 偏好加分，避免完全不考慮偏好
 
         return score;
     }
 }
 
 export class PreferenceStrategy {
-    static calculateScore(uid, shift, day, context, currentCounts, w) {
+    static calculateScore(uid, shift, day, context, currentCounts, w, weights) {
         let score = 100;
         const prefs = context.preferences[uid] || {};
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
         // 1. 滿足願望 (絕對優先)
+        // 使用 weights.pref (偏好滿足度權重)
         if (prefs.p1 === shift) {
-            score += WEIGHTS.PREF_P1;
+            score += weights.pref * 3; // P1 權重最高
         } else if (prefs.p2 === shift) {
-            score += WEIGHTS.PREF_P2;
-        } else if (prefs.p3 === shift) { // <-- 修正：確保 P3 (勿排) 被絕對禁止
-            // P3 視為「勿排」
-            score += WEIGHTS.PREF_NO;
+            score += weights.pref * 2; // P2 權重次之
+        } else if (prefs.p3 === shift) { 
+            // P3 視為「勿排」 (我們在 AutoScheduler 中已經處理了硬性勿排，這裡作為軟性懲罰)
+            score += weights.pref * -1; // 輕微懲罰
         } else if (shift !== 'OFF') {
-            // 若此班別既非 P1/P2 也非 P3，且不是 OFF -> 重罰 (非志願班)
-            score += WEIGHTS.NOT_IN_PREF;
+            // 若此班別既非 P1/P2/P3 也非 OFF -> 重罰 (非志願班)
+            score += weights.pref * -2;
         }
 
-        // 2. 人力需求 (次要)
+        // 2. 預班達成 (使用 weights.wish 權重)
+        // 這裡的 wish 應該是針對員工在日曆上標註的固定班別，但這部分邏輯在 AutoScheduler 的 whitelists 中處理了，
+        // 這裡可以將其視為對排入 OFF 的獎勵/懲罰
+        if (context.wishes[uid]?.[day] === shift) {
+            score += weights.wish * 2;
+        }
+
+        // 3. 人力需求 (次要)
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += 1000; // 降低填補缺口的誘因
-            else score += WEIGHTS.OVER_STAFFED;
+            if (current < shiftReq) score += weights.coverage / 10; // 輕微填補缺口的誘因
+            else score += weights.overwork / 10; // 輕微超額懲罰
         }
 
         return score;
@@ -71,20 +63,30 @@ export class PreferenceStrategy {
 }
 
 export class PatternStrategy {
-    static calculateScore(uid, shift, day, context, currentCounts, w) {
+    static calculateScore(uid, shift, day, context, currentCounts, w, weights) {
         let score = 100;
         const prev = context.assignments[uid][day-1] || 'OFF';
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
         // 1. 連續性 (作息規律優先)
-        if (shift === prev && shift !== 'OFF') score += WEIGHTS.CONTINUITY_BONUS;
-        if (shift !== prev && prev !== 'OFF' && shift !== 'OFF') score += WEIGHTS.PATTERN_PENALTY;
+        // 連續工作懲罰 (weights.cons)
+        // 連續工作天數的硬性約束在 AutoScheduler 中處理，這裡只處理軟性懲罰
+        
+        // 夜班接白班懲罰 (weights.nToD)
+        const isNToD = (prev === 'N' && shift === 'D');
+        if (isNToD) score += weights.nToD * 2; // 重罰
+
+        // 避免逆向輪轉 (N->E, E->D, N->D)
+        const isReverseRotation = (prev === 'N' && shift === 'E') || 
+                                  (prev === 'E' && shift === 'D') || 
+                                  (prev === 'N' && shift === 'D');
+        if (isReverseRotation) score += weights.nToD; // 輕微懲罰
 
         // 2. 人力需求
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
-            else score += WEIGHTS.OVER_STAFFED;
+            if (current < shiftReq) score += weights.coverage / 10;
+            else score += weights.overwork / 10;
         }
 
         return score;

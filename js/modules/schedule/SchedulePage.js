@@ -67,120 +67,28 @@ export class SchedulePage {
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
 
         const modalHtml = `
-            <div class="modal fade" id="settings-modal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
+            <div class="modal fade" id="versions-modal" tabindex="-1">
+                <div class="modal-dialog modal-xl">
                     <div class="modal-content">
-                        <div class="modal-header bg-secondary text-white">
-                            <h5 class="modal-title"><i class="fas fa-sliders-h me-2"></i>排班規則與評分設定</h5>
+                        <div class="modal-header bg-primary text-white">
+                            <h5 class="modal-title"><i class="fas fa-robot me-2"></i>AI 智慧排班結果選擇</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body">
-                            <ul class="nav nav-tabs mb-3" id="settingTabs" role="tablist">
-                                <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-rules">一般規則</button></li>
-                                <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-strategies">AI 策略權重</button></li>
-                            </ul>
-                            
-                            <form id="settings-form">
-                                <div class="tab-content">
-                                    <div class="tab-pane fade show active" id="tab-rules">
-                                        <div class="card mb-3 border-left-danger">
-                                            <div class="card-header bg-light fw-bold text-danger">1. 硬性規範 (Hard Constraints)</div>
-                                            <div class="card-body bg-light">
-                                                <div class="row g-3">
-                                                    <div class="col-md-6">
-                                                        <div class="form-check form-switch">
-                                                            <input class="form-check-input" type="checkbox" id="set-interval-11h" checked disabled>
-                                                            <label class="form-check-label fw-bold">班與班間隔至少 11 小時</label>
-                                                            <div class="form-text small">依據法規強制執行，不可關閉。</div>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <label class="form-label fw-bold">一週內班別種類上限</label>
-                                                        <select class="form-select bg-white" id="set-weekly-limit" disabled>
-                                                            <option value="2" selected>最多 2 種</option>
-                                                        </select>
-                                                        <div class="form-text small">依據法規強制執行，固定為 2 種。</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="card mb-3 border-left-primary">
-                                            <div class="card-header bg-light fw-bold text-primary">2. 單位排班原則 (Unit Rules)</div>
-                                            <div class="card-body">
-                                                <div class="row g-3">
-                                                    <div class="col-md-6">
-                                                        <label class="form-label fw-bold">一個月內班別種類上限</label>
-                                                        <select class="form-select" id="set-monthly-limit">
-                                                            <option value="2">最多 2 種 (標準)</option>
-                                                            <option value="3">最多 3 種 (彈性)</option>
-                                                        </select>
-                                                    </div>
-                                                    <div class="col-md-6 d-flex align-items-center">
-                                                        <div class="form-check ms-2">
-                                                            <input class="form-check-input" type="checkbox" id="set-month-continuity">
-                                                            <label class="form-check-label"><strong>月初接班：</strong>可順接上月</label>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <label class="form-label fw-bold">連續上班上限 (日)</label>
-                                                        <div class="input-group">
-                                                            <input type="number" class="form-control" id="set-max-consecutive" value="6" min="1" max="14">
-                                                            <span class="input-group-text">天</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <div class="form-check mt-4">
-                                                            <input class="form-check-input" type="checkbox" id="set-allow-long-leave">
-                                                            <label class="form-check-label fw-bold">長假例外 (可連7)</label>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <label class="form-label fw-bold text-danger">重平衡嘗試次數</label>
-                                                        <input type="number" class="form-control" id="set-rebalance-loop" value="3" min="1" max="10">
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="tab-pane fade" id="tab-strategies">
-                                        <div class="alert alert-info py-2 small">調整各策略的評分權重，數值越高代表 AI 越重視該項目。</div>
-                                        <h6 class="fw-bold text-primary mt-3">方案 A：數值平衡</h6>
-                                        <div class="card card-body bg-light mb-3 py-2">
-                                            <div class="row align-items-center">
-                                                <div class="col-4"><label class="small fw-bold">超額上班扣分</label></div>
-                                                <div class="col-8"><input type="range" class="form-range" id="w-a-over" min="-500" max="-10" step="10"></div>
-                                            </div>
-                                        </div>
-                                        <h6 class="fw-bold text-success mt-3">方案 B：願望優先</h6>
-                                        <div class="card card-body bg-light mb-3 py-2">
-                                            <div class="row align-items-center mb-2">
-                                                <div class="col-4"><label class="small fw-bold">P1 加分</label></div>
-                                                <div class="col-8"><input type="range" class="form-range" id="w-b-p1" min="1000" max="10000" step="500"></div>
-                                            </div>
-                                            <div class="row align-items-center">
-                                                <div class="col-4"><label class="small fw-bold">P2 加分</label></div>
-                                                <div class="col-8"><input type="range" class="form-range" id="w-b-p2" min="500" max="5000" step="100"></div>
-                                            </div>
-                                        </div>
-                                        <h6 class="fw-bold text-warning mt-3">方案 C：規律作息</h6>
-                                        <div class="card card-body bg-light mb-3 py-2">
-                                            <div class="row align-items-center mb-2">
-                                                <div class="col-4"><label class="small fw-bold">連續獎勵</label></div>
-                                                <div class="col-8"><input type="range" class="form-range" id="w-c-continuity" min="100" max="2000" step="100"></div>
-                                            </div>
-                                            <div class="row align-items-center">
-                                                <div class="col-4"><label class="small fw-bold">換班懲罰</label></div>
-                                                <div class="col-8"><input type="range" class="form-range" id="w-c-pattern" min="-500" max="-10" step="10"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </form>
+                        <div class="modal-body" id="versions-modal-body">
+                            <!-- AI 排班結果將在這裡渲染 -->
                         </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                            <button type="button" class="btn btn-primary" onclick="window.routerPage.saveSettings()">儲存設定</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal fade" id="score-modal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header bg-success text-white">
+                            <h5 class="modal-title"><i class="fas fa-star me-2"></i>排班品質評分細節</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="score-modal-body">
+                            <!-- 評分細節將在這裡渲染 -->
                         </div>
                     </div>
                 </div>
@@ -189,683 +97,492 @@ export class SchedulePage {
 
         return `
             ${style}
-            <div class="container-fluid p-0 h-100 d-flex flex-column">
-                <div class="schedule-toolbar p-3 bg-white border-bottom d-flex align-items-center gap-3 justify-content-between">
-                    <div class="d-flex align-items-center gap-2">
-                        <h4 class="mb-0 fw-bold text-primary"><i class="bi bi-calendar-week"></i> 排班作業</h4>
-                        <span id="schedule-status-badge" class="badge bg-secondary">載入中</span>
-                        <div id="loading-indicator" class="spinner-border spinner-border-sm text-primary" style="display:none;"></div>
-                    </div>
-                    <div class="d-flex align-items-center gap-3">
-                        <div id="score-display-card" class="d-flex align-items-center px-3 py-1 bg-light rounded border cursor-pointer" onclick="window.routerPage.showScoreDetails()">
-                            <span class="text-muted me-2 small">排班評分</span>
-                            <h3 class="mb-0 fw-bold text-secondary" id="score-display">--</h3>
-                            <span class="ms-1 small">分</span>
-                        </div>
-                        <button id="btn-settings" class="btn btn-outline-secondary" title="規則與評分設定"><i class="fas fa-cog"></i> 設定</button>
-                        <button id="btn-auto-schedule" class="btn btn-outline-primary"><i class="bi bi-robot"></i> AI 排班</button>
-                        <button id="btn-clear" class="btn btn-outline-danger"><i class="bi bi-arrow-counterclockwise"></i> 重置</button>
-                        <button id="btn-publish" class="btn btn-success"><i class="bi bi-check-circle"></i> 發布班表</button>
+            ${modalHtml}
+            <div class="container-fluid mt-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h3 class="text-gray-800 fw-bold"><i class="fas fa-calendar-alt"></i> 排班作業：<span id="schedule-title">載入中...</span></h3>
+                    <div class="d-flex gap-2">
+                        <button id="btn-settings" class="btn btn-secondary shadow-sm" onclick="window.routerPage.openSettingsModal()">
+                            <i class="fas fa-cog"></i> 規則與評分設定
+                        </button>
+                        <button id="btn-ai-schedule" class="btn btn-primary shadow-sm" onclick="window.routerPage.openVersionsModal()">
+                            <i class="fas fa-robot"></i> AI 智慧排班
+                        </button>
+                        <button id="btn-save" class="btn btn-success shadow-sm" onclick="window.routerPage.saveSchedule()">
+                            <i class="fas fa-save"></i> 儲存排班
+                        </button>
                     </div>
                 </div>
-                <div class="flex-grow-1 overflow-auto bg-light p-3" id="schedule-grid-container"></div>
+                
+                <div id="schedule-container" class="card shadow mb-4">
+                    <div class="card-body p-0">
+                        <div class="schedule-table-wrapper">
+                            <table class="table table-bordered schedule-grid mb-0">
+                                <thead id="schedule-thead"></thead>
+                                <tbody id="schedule-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
-            
-            <div class="modal fade" id="score-modal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-success text-white"><h5 class="modal-title">排班品質評分報告</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body" id="score-details-body"></div></div></div></div>
-            <div class="modal fade" id="versions-modal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">AI 智慧排班結果選擇</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="ai-progress-container" class="mb-3" style="display:none;"><div id="ai-progress-text" class="mb-1 text-primary">正在運算中...</div><div class="progress"><div id="ai-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div></div></div><ul class="nav nav-tabs" id="versionTabs" role="tablist"><li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#v1">版本 1</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#v2">版本 2</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#v3">版本 3</button></li></ul><div class="tab-content p-3 border border-top-0" id="versionTabContent"><div class="tab-pane fade show active" id="v1"></div><div class="tab-pane fade" id="v2"></div><div class="tab-pane fade" id="v3"></div></div></div></div></div></div>
-            ${modalHtml}
         `;
     }
 
     async afterRender() {
+        window.routerPage = this; 
         this.versionsModal = new bootstrap.Modal(document.getElementById('versions-modal'));
         this.scoreModal = new bootstrap.Modal(document.getElementById('score-modal'));
         this.settingsModal = new bootstrap.Modal(document.getElementById('settings-modal'));
-        window.routerPage = this;
-
-        document.getElementById('btn-auto-schedule').addEventListener('click', () => this.runMultiVersionAI());
-        document.getElementById('btn-clear').addEventListener('click', () => this.resetToPreSchedule());
-        document.getElementById('btn-publish').addEventListener('click', () => this.togglePublish());
-        document.getElementById('btn-settings').addEventListener('click', () => this.openSettingsModal());
-
-        document.removeEventListener('click', this.handleGlobalClick); 
-        document.addEventListener('click', this.handleGlobalClick);
-
+        
         await this.loadData();
+        this.renderSchedule();
+        this.attachEvents();
     }
 
-    handleGlobalClick(e) {
-        if (!e.target.closest('.shift-menu') && !e.target.closest('.shift-cell') && this.state.activeMenu) {
-            this.closeMenu();
-        }
-    }
-
-    closeMenu() {
-        if (this.state.activeMenu) { this.state.activeMenu.remove(); this.state.activeMenu = null; }
-    }
-    
     async loadData() {
-        const container = document.getElementById('schedule-grid-container');
-        const loading = document.getElementById('loading-indicator');
-        if(loading) loading.style.display = 'block';
-
-        try {
-            const preSchedule = await PreScheduleService.getPreSchedule(this.state.currentUnitId, this.state.year, this.state.month);
-            this.state.preSchedule = preSchedule; 
-
-            let staffList = [];
-            if (preSchedule && preSchedule.staffSnapshots && preSchedule.staffSnapshots.length > 0) {
-                staffList = preSchedule.staffSnapshots;
-            } else if (preSchedule && preSchedule.staffIds && preSchedule.staffIds.length > 0) {
-                const promises = preSchedule.staffIds.map(uid => userService.getUserData(uid));
-                const users = await Promise.all(promises);
-                staffList = users.filter(u => u);
-            } else {
-                staffList = await userService.getUnitStaff(this.state.currentUnitId);
-            }
-
-            const [unit, schedule, allUnits] = await Promise.all([
-                UnitService.getUnitByIdWithCache(this.state.currentUnitId),
-                ScheduleService.getSchedule(this.state.currentUnitId, this.state.year, this.state.month),
-                UnitService.getAllUnits()
-            ]);
-
-            this.state.unitSettings = unit;
-            this.state.staffList = staffList;
-            this.state.daysInMonth = new Date(this.state.year, this.state.month, 0).getDate();
-            
-            this.state.unitMap = {};
-            if (allUnits) {
-                allUnits.forEach(u => this.state.unitMap[u.unitId] = u.unitName);
-            }
-
-            if (!schedule) {
-                const newSched = await ScheduleService.createEmptySchedule(
-                    this.state.currentUnitId, this.state.year, this.state.month, staffList.map(s=>s.uid)
-                );
-                this.state.scheduleData = newSched;
-                await this.resetToPreSchedule(false);
-            } else {
-                this.state.scheduleData = schedule;
-                this.renderGrid();
-                this.updateStatusBadge();
-                this.updateScoreDisplay();
-            }
-        } catch (error) {
-            console.error(error);
-            container.innerHTML = `<div class="alert alert-danger m-3">載入失敗: ${error.message}</div>`;
-        } finally {
-            if(loading) loading.style.display = 'none';
-        }
-    }
-
-    openSettingsModal() {
-        const rules = this.state.unitSettings?.settings?.rules || {};
-        const constraints = rules.constraints || {};
-        const weights = this.state.unitSettings?.settings?.strategyWeights || {};
-
-        document.getElementById('set-interval-11h').checked = true; 
-        document.getElementById('set-weekly-limit').value = "2";
-        document.getElementById('set-max-consecutive').value = rules.maxConsecutiveWork || 6;
-        document.getElementById('set-allow-long-leave').checked = !!constraints.allowLongLeaveException;
-        document.getElementById('set-rebalance-loop').value = rules.rebalanceLoop || 3;
+        const { currentUnitId, year, month } = this.state;
         
-        document.getElementById('set-monthly-limit').value = constraints.monthlyShiftLimit || "2"; 
-        document.getElementById('set-month-continuity').checked = !!constraints.allowMonthContinuity;
-
-        document.getElementById('w-a-over').value = weights.A_overStaffed || -20;
-        document.getElementById('w-b-p1').value = weights.B_p1 || 5000;
-        document.getElementById('w-b-p2').value = weights.B_p2 || 2000;
-        document.getElementById('w-c-continuity').value = weights.C_continuity || 500;
-        document.getElementById('w-c-pattern').value = weights.C_pattern || -100;
-
-        this.settingsModal.show();
-    }
-
-    async saveSettings() {
-        const currentRules = this.state.unitSettings?.settings?.rules || {};
+        // 1. 載入單位設定
+        this.state.unitSettings = await UnitService.getUnitSettings(currentUnitId);
         
-        const newRules = {
-            ...currentRules,
-            maxConsecutiveWork: parseInt(document.getElementById('set-max-consecutive').value),
-            rebalanceLoop: parseInt(document.getElementById('set-rebalance-loop').value),
-            constraints: {
-                ...currentRules.constraints,
-                minInterval11h: true, 
-                weeklyShiftLimit: 2, 
-                monthlyShiftLimit: parseInt(document.getElementById('set-monthly-limit').value),
-                allowMonthContinuity: document.getElementById('set-month-continuity').checked,
-                allowLongLeaveException: document.getElementById('set-allow-long-leave').checked,
-            }
-        };
-
-        const strategyWeights = {
-            A_overStaffed: parseInt(document.getElementById('w-a-over').value),
-            B_p1: parseInt(document.getElementById('w-b-p1').value),
-            B_p2: parseInt(document.getElementById('w-b-p2').value),
-            C_continuity: parseInt(document.getElementById('w-c-continuity').value),
-            C_pattern: parseInt(document.getElementById('w-c-pattern').value)
-        };
-
-        try {
-            const currentSettings = this.state.unitSettings.settings || {};
-            const updatedSettings = {
-                ...currentSettings,
-                rules: newRules,
-                strategyWeights: strategyWeights
+        // 2. 載入員工列表
+        this.state.staffList = await userService.getStaffListByUnit(currentUnitId);
+        
+        // 3. 載入預排班表 (Pre-Schedule)
+        this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
+        
+        // 4. 載入排班表
+        this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
+        if (!this.state.scheduleData) {
+            this.state.scheduleData = {
+                unitId: currentUnitId, year, month,
+                assignments: {},
+                logs: [],
+                version: 0,
+                activeVersion: 0
             };
-
-            await UnitService.updateUnit(this.state.currentUnitId, { settings: updatedSettings });
-            this.state.unitSettings.settings = updatedSettings;
-            
-            alert("設定已儲存！");
-            this.settingsModal.hide();
-        } catch (e) {
-            console.error(e);
-            alert("儲存失敗: " + e.message);
         }
+        
+        // 5. 計算天數
+        this.state.daysInMonth = new Date(year, month, 0).getDate();
+        
+        // 6. 更新標題
+        document.getElementById('schedule-title').textContent = `${this.state.unitSettings.unitName} ${year}年${month}月`;
     }
 
-    renderGrid() {
-        const container = document.getElementById('schedule-grid-container');
-        const { year, month, daysInMonth, staffList, scheduleData, sortKey, sortAsc, unitMap, currentUnitId, preSchedule } = this.state;
-        const assignments = scheduleData.assignments || {};
-        const prevAssignments = scheduleData.prevAssignments || {};
+    renderSchedule() {
+        const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
+        const staffMap = {};
+        staffList.forEach(s => staffMap[s.uid] = s);
 
+        // 排序員工列表
         staffList.sort((a, b) => {
-            let valA = '', valB = '';
-            if (sortKey === 'staffId') {
-                valA = a.staffId || ''; valB = b.staffId || '';
-            } else if (sortKey === 'name') {
-                valA = a.name || ''; valB = b.name || '';
-            } else {
-                valA = a.id || ''; valB = b.id || '';
-            }
-            if (valA < valB) return sortAsc ? -1 : 1;
-            if (valA > valB) return sortAsc ? 1 : -1;
+            const valA = a[this.state.sortKey] || '';
+            const valB = b[this.state.sortKey] || '';
+            if (valA < valB) return this.state.sortAsc ? -1 : 1;
+            if (valA > valB) return this.state.sortAsc ? 1 : -1;
             return 0;
         });
 
-        const getArrow = (key) => (sortKey === key ? (sortAsc ? '▲' : '▼') : '');
+        // 渲染表頭
+        const thead = document.getElementById('schedule-thead');
+        thead.innerHTML = this.renderHeader(daysInMonth);
 
-        const getDisplayName = (staff) => {
-            if (!staff.unitId || staff.unitId === currentUnitId) return staff.name;
-            const uName = unitMap[staff.unitId] || '外借';
-            return `${staff.name}<span class="text-danger small ms-1">(${uName})</span>`;
-        };
+        // 渲染表身
+        const tbody = document.getElementById('schedule-tbody');
+        tbody.innerHTML = staffList.map(staff => this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)).join('');
 
-        const getNoteContent = (staff) => {
-            let parts = [];
-            const sub = preSchedule?.submissions?.[staff.uid];
-            if (sub?.notes) parts.push(sub.notes);
-            if (sub?.preferences) {
-                const p = sub.preferences;
-                let prefStr = '';
-                if (p.batch) prefStr += `[包${p.batch}] `;
-                let ranks = [];
-                if (p.priority1) ranks.push(p.priority1);
-                if (p.priority2) ranks.push(p.priority2);
-                if (ranks.length > 0) prefStr += ranks.join('>');
-                if (prefStr) parts.push(prefStr);
-            }
-            if (staff.note) parts.push(staff.note);
-            return parts.join(' | ');
-        };
+        // 渲染統計行
+        tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
 
-        const dailyStats = [];
-        const reqMatrix = this.state.unitSettings?.staffRequirements || { D:[], E:[], N:[] };
-        
+        // 重新計算評分
+        this.calculateScore();
+    }
+
+    renderHeader(daysInMonth) {
+        let html = `<tr>
+            <th class="sticky-col first-col cursor-pointer" data-sort="staffId">ID <i class="fas fa-sort sort-icon"></i></th>
+            <th class="sticky-col second-col cursor-pointer" data-sort="name">姓名 <i class="fas fa-sort sort-icon"></i></th>
+            <th class="sticky-col third-col">備註</th>
+        `;
         for (let d = 1; d <= daysInMonth; d++) {
-            const date = new Date(year, month - 1, d);
-            const w = date.getDay();
+            const date = new Date(this.state.year, this.state.month - 1, d);
+            const dayOfWeek = date.getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            html += `<th class="${isWeekend ? 'bg-light-gray' : ''}">${d}</th>`;
+        }
+        html += `<th class="sticky-col right-col-4">總時</th>
+                 <th class="sticky-col right-col-3">夜班</th>
+                 <th class="sticky-col right-col-2">休假</th>
+                 <th class="sticky-col right-col-1">違規</th>
+                 </tr>`;
+        return html;
+    }
+
+    renderStaffRow(staff, assignments, daysInMonth, unitSettings) {
+        const uid = staff.uid;
+        let html = `<tr>
+            <td class="sticky-col first-col">${staff.staffId}</td>
+            <td class="sticky-col second-col">${staff.name}</td>
+            <td class="sticky-col third-col small text-truncate" title="${staff.constraints?.isPregnant ? '懷孕' : ''}">${staff.constraints?.isPregnant ? '🤰' : ''}</td>
+        `;
+        
+        let totalHours = 0;
+        let totalNights = 0;
+        let totalOff = 0;
+        let violationCount = 0;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const shift = assignments[d] || '';
+            const date = new Date(this.state.year, this.state.month - 1, d);
+            const dayOfWeek = date.getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const shiftClass = this.getShiftClass(shift);
             
-            let counts = { D:0, E:0, N:0, OFF:0 };
-            staffList.forEach(s => {
-                const shift = assignments[s.uid]?.[d];
-                if (shift && counts[shift] !== undefined) counts[shift]++;
-                else if (shift === 'M_OFF') counts['OFF']++;
+            // 計算統計數據
+            if (shift === 'OFF' || shift === 'M_OFF') {
+                totalOff++;
+            } else if (shift) {
+                const shiftDef = unitSettings.settings?.shifts.find(s => s.code === shift);
+                const hours = parseFloat(shiftDef?.hours || 0);
+                totalHours += hours;
+                if (shift === 'N' || shift === 'E') totalNights++;
+            }
+
+            // 檢查單日違規 (僅檢查硬性規則)
+            const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
+            if (validation.errors[d]) violationCount++;
+
+            html += `<td class="shift-cell ${shiftClass} ${isWeekend ? 'bg-light-gray' : ''}" data-uid="${uid}" data-day="${d}">
+                <input type="text" class="form-control form-control-sm text-center shift-input" value="${shift}" maxlength="3" data-uid="${uid}" data-day="${d}">
+            </td>`;
+        }
+
+        html += `<td class="sticky-col right-col-4 text-end fw-bold">${totalHours.toFixed(1)}</td>
+                 <td class="sticky-col right-col-3 text-end fw-bold">${totalNights}</td>
+                 <td class="sticky-col right-col-2 text-end fw-bold">${totalOff}</td>
+                 <td class="sticky-col right-col-1 text-end fw-bold ${violationCount > 0 ? 'text-danger' : 'text-success'}">${violationCount}</td>
+                 </tr>`;
+        return html;
+    }
+
+    renderStatsRow(daysInMonth, assignments, unitSettings) {
+        const staffReq = unitSettings.staffRequirements || {};
+        const shiftCodes = unitSettings.settings?.shifts.map(s => s.code) || ['D', 'E', 'N'];
+        
+        let html = `<tr class="stats-row">
+            <td class="sticky-col first-col"></td>
+            <td class="sticky-col second-col fw-bold">人力需求</td>
+            <td class="sticky-col third-col"></td>
+        `;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const date = new Date(this.state.year, this.state.month - 1, d);
+            const dayOfWeek = date.getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            
+            let required = 0;
+            let assigned = 0;
+            
+            shiftCodes.forEach(code => {
+                required += staffReq[code]?.[dayOfWeek] || 0;
             });
 
-            const reqD = reqMatrix.D?.[w] || 0;
-            const reqE = reqMatrix.E?.[w] || 0;
-            const reqN = reqMatrix.N?.[w] || 0;
+            Object.keys(assignments).forEach(uid => {
+                const shift = assignments[uid][d];
+                if (shift && shift !== 'OFF' && shift !== 'M_OFF') {
+                    assigned++;
+                }
+            });
 
-            // 紅框警示判斷
-            const hasError = (counts.D < reqD) || (counts.E < reqE) || (counts.N < reqN);
-            const errorStyle = hasError ? 'border: 3px solid #dc3545 !important; background-color: #ffe6e6 !important;' : '';
+            const diff = assigned - required;
+            const diffClass = diff > 0 ? 'text-success' : (diff < 0 ? 'text-danger' : 'text-dark');
 
-            dailyStats[d] = {
-                counts,
-                style: errorStyle,
-                html: `
-                    <div style="font-size:0.6rem; line-height:1.1;">
-                        <span class="${counts.D < reqD ? 'text-danger fw-bold' : (counts.D > reqD ? 'text-warning' : '')}">D:${counts.D}/${reqD}</span><br>
-                        <span class="${counts.E < reqE ? 'text-danger fw-bold' : (counts.E > reqE ? 'text-warning' : '')}">E:${counts.E}/${reqE}</span><br>
-                        <span class="${counts.N < reqN ? 'text-danger fw-bold' : (counts.N > reqN ? 'text-warning' : '')}">N:${counts.N}/${reqN}</span>
-                    </div>
-                `
-            };
+            html += `<td class="${isWeekend ? 'bg-light-gray' : ''} text-center small fw-bold ${diffClass}" title="需求: ${required}, 實際: ${assigned}">
+                ${assigned}/${required}
+            </td>`;
         }
 
-        let html = `
-            <div class="schedule-table-wrapper shadow-sm bg-white rounded">
-                <table class="table table-bordered table-sm text-center mb-0 align-middle schedule-grid">
-                    <thead class="bg-light">
-                        <tr>
-                            <th class="sticky-col first-col bg-light cursor-pointer" onclick="window.routerPage.sortStaff('staffId')" title="依職編排序">
-                                職編 <span class="sort-icon">${getArrow('staffId')}</span>
-                            </th>
-                            <th class="sticky-col second-col bg-light cursor-pointer" onclick="window.routerPage.sortStaff('name')" title="依姓名排序">
-                                姓名 <span class="sort-icon">${getArrow('name')}</span>
-                            </th>
-                            <th class="sticky-col third-col bg-light">備註</th>
-        `;
-        const prevMonthLastDate = new Date(year, month - 1, 0); 
-        const prevLastDayVal = prevMonthLastDate.getDate();
-        const prevDaysToShow = [];
-        for(let i=5; i>=0; i--) { prevDaysToShow.push(prevLastDayVal - i); }
-        prevDaysToShow.forEach(d => html += `<th class="text-muted bg-light-gray" style="font-size:0.8rem">${d}</th>`);
-        for (let d = 1; d <= daysInMonth; d++) {
-            const date = new Date(year, month - 1, d);
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            const weekStr = ['日','一','二','三','四','五','六'][date.getDay()];
-            const headerStyle = dailyStats[d].style ? 'border-bottom: 3px solid red;' : '';
-            
-            html += `<th class="${isWeekend?'text-danger':''}" style="font-size:0.9rem; ${headerStyle}">${d}<div style="font-size:0.7rem">${weekStr}</div></th>`;
+        html += `<td class="sticky-col right-col-4"></td>
+                 <td class="sticky-col right-col-3"></td>
+                 <td class="sticky-col right-col-2"></td>
+                 <td class="sticky-col right-col-1"></td>
+                 </tr>`;
+        return html;
+    }
+
+    getShiftClass(shift) {
+        switch (shift) {
+            case 'D': return 'bg-info text-white';
+            case 'E': return 'bg-warning text-dark';
+            case 'N': return 'bg-dark text-white';
+            case 'OFF': return 'bg-light text-dark';
+            case 'M_OFF': return 'bg-danger text-white';
+            default: return '';
         }
-        html += `
-                            <th class="sticky-col right-col-4 bg-light text-primary">OFF</th>
-                            <th class="sticky-col right-col-3 bg-light">小夜</th>
-                            <th class="sticky-col right-col-2 bg-light">大夜</th>
-                            <th class="sticky-col right-col-1 bg-light">假日</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-        `;
+    }
+
+    attachEvents() {
+        document.addEventListener('click', this.handleGlobalClick);
         
-        staffList.forEach(staff => {
-            const uid = staff.uid;
-            const userShifts = assignments[uid] || {};
-            const prevUserShifts = prevAssignments[uid] || {};
-            const stats = this.calculateRowStats(userShifts);
-            const noteText = getNoteContent(staff);
-
-            html += `
-                <tr>
-                    <td class="sticky-col first-col bg-white fw-bold">${staff.staffId || staff.id || ''}</td>
-                    <td class="sticky-col second-col bg-white text-nowrap">${getDisplayName(staff)}</td>
-                    <td class="sticky-col third-col bg-white small text-muted text-truncate" title="${noteText}">${noteText}</td>
-            `;
-            prevDaysToShow.forEach(d => { html += `<td class="bg-light-gray text-muted small">${prevUserShifts[d] || '-'}</td>`; });
-            for (let d = 1; d <= daysInMonth; d++) {
-                const val = userShifts[d] || '';
-                html += `<td class="p-0 shift-cell" data-staff-id="${uid}" data-day="${d}" onclick="window.routerPage.openShiftMenu(this)" style="${val==='OFF'?'background:#f0f0f0':''}">
-                            ${val}
-                         </td>`;
+        // 排序事件
+        document.getElementById('schedule-thead').addEventListener('click', (e) => {
+            const target = e.target.closest('th[data-sort]');
+            if (target) {
+                const sortKey = target.dataset.sort;
+                if (this.state.sortKey === sortKey) {
+                    this.state.sortAsc = !this.state.sortAsc;
+                } else {
+                    this.state.sortKey = sortKey;
+                    this.state.sortAsc = true;
+                }
+                this.renderSchedule();
             }
-            html += `
-                    <td class="sticky-col right-col-4 bg-white fw-bold text-primary" id="stat-off-${uid}">${stats.off}</td>
-                    <td class="sticky-col right-col-3 bg-white" id="stat-e-${uid}">${stats.e}</td>
-                    <td class="sticky-col right-col-2 bg-white" id="stat-n-${uid}">${stats.n}</td>
-                    <td class="sticky-col right-col-1 bg-white" id="stat-hol-${uid}">${stats.hol}</td>
-                </tr>
-            `;
         });
 
-        html += `
-            <tr class="stats-row">
-                <td class="sticky-col first-col">統計</td>
-                <td class="sticky-col second-col">每日人力</td>
-                <td class="sticky-col third-col"></td>
-        `;
-        prevDaysToShow.forEach(() => html += `<td></td>`);
-        for (let d = 1; d <= daysInMonth; d++) {
-            html += `<td class="p-1" style="${dailyStats[d].style}">${dailyStats[d].html}</td>`;
-        }
-        html += `<td colspan="4"></td></tr>`;
-
-        html += `</tbody></table></div>`;
-        container.innerHTML = html;
-    }
-
-    calculateRowStats(shifts) {
-        let off = 0, e = 0, n = 0, hol = 0;
-        const { year, month, daysInMonth } = this.state;
-        for (let d = 1; d <= daysInMonth; d++) {
-            const s = shifts[d];
-            if (!s) continue;
-            if (['OFF', 'M_OFF'].includes(s)) off++;
-            if (s === 'E') e++;
-            if (s === 'N') n++;
-            const date = new Date(year, month - 1, d);
-            const w = date.getDay();
-            if ((w === 0 || w === 6) && !['OFF', 'M_OFF'].includes(s)) hol++;
-        }
-        return { off, e, n, hol };
-    }
-
-    sortStaff(key) {
-        if (this.state.sortKey === key) this.state.sortAsc = !this.state.sortAsc;
-        else { this.state.sortKey = key; this.state.sortAsc = true; }
-        this.renderGrid();
-    }
-
-    openShiftMenu(cell) {
-        const shifts = this.state.unitSettings?.settings?.shifts || [
-            {code:'D', name:'白班', color:'#fff'},
-            {code:'E', name:'小夜', color:'#fff'},
-            {code:'N', name:'大夜', color:'#fff'}
-        ];
-        this.closeMenu();
-        const menu = document.createElement('div');
-        menu.className = 'shift-menu shadow rounded border bg-white';
-        menu.style.position = 'absolute'; menu.style.zIndex = '1000'; menu.style.padding = '5px';
-        const opts = [{ code: '', name: '清除', color: 'transparent' }, { code: 'OFF', name: '休假', color: '#e5e7eb' }];
-        [...shifts, ...opts].forEach(s => {
-            if(s.code === 'OFF' || s.code === '') return;
+        // 班別輸入事件
+        document.getElementById('schedule-tbody').addEventListener('change', (e) => {
+            const input = e.target.closest('.shift-input');
+            if (input) {
+                const uid = input.dataset.uid;
+                const day = parseInt(input.dataset.day);
+                const shift = input.value.toUpperCase().trim();
+                
+                // 更新數據
+                this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
+                this.state.scheduleData.assignments[uid][day] = shift;
+                
+                // 更新單元格樣式
+                const cell = input.closest('.shift-cell');
+                cell.className = `shift-cell ${this.getShiftClass(shift)} ${cell.classList.contains('bg-light-gray') ? 'bg-light-gray' : ''}`;
+                
+                // 重新渲染以更新統計數據和違規計數
+                this.renderSchedule();
+            }
         });
         
-        const renderItem = (s) => {
-            const item = document.createElement('div');
-            item.className = 'p-1'; item.style.cursor = 'pointer';
-            item.innerHTML = `<span style="display:inline-block;width:15px;height:15px;background:${s.color};border:1px solid #ddd;margin-right:5px;"></span> ${s.code}`;
-            item.onclick = () => this.handleShiftSelect(cell, s.code);
-            menu.appendChild(item);
-        };
-        renderItem({ code: '', name: '清除', color: '#fff' });
-        renderItem({ code: 'OFF', name: '休假', color: '#eee' });
-        shifts.forEach(s => renderItem(s));
-        const rect = cell.getBoundingClientRect();
-        menu.style.top = `${rect.bottom + window.scrollY}px`; 
-        menu.style.left = `${rect.left + window.scrollX}px`;
-        document.body.appendChild(menu);
-        this.state.activeMenu = menu;
+        // AI 排班按鈕事件 (在 openVersionsModal 中處理)
     }
 
-    async handleShiftSelect(cell, code) {
-        this.closeMenu();
-        const uid = cell.dataset.staffId;
-        const day = cell.dataset.day;
-        if (!this.state.scheduleData.assignments[uid]) this.state.scheduleData.assignments[uid] = {};
-        this.state.scheduleData.assignments[uid][day] = code;
-        cell.textContent = code;
-        cell.style.background = code === 'OFF' ? '#f0f0f0' : '';
-        const stats = this.calculateRowStats(this.state.scheduleData.assignments[uid]);
-        document.getElementById(`stat-off-${uid}`).textContent = stats.off;
-        document.getElementById(`stat-e-${uid}`).textContent = stats.e;
-        document.getElementById(`stat-n-${uid}`).textContent = stats.n;
-        document.getElementById(`stat-hol-${uid}`).textContent = stats.hol;
-        await ScheduleService.updateShift(this.state.currentUnitId, this.state.year, this.state.month, uid, day, code);
-        this.updateScoreDisplay();
-    }
+    // --- 評分相關 ---
+    async calculateScore() {
+        const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
+        if (!scheduleData || !unitSettings || !preSchedule) return;
 
-    async updateScoreDisplay() {
-        const { scheduleData, staffList, unitSettings, year, month } = this.state;
-        if (!scheduleData || !scheduleData.assignments) return;
-        const preSchedule = await PreScheduleService.getPreSchedule(this.state.currentUnitId, year, month);
-        const fullPreSchedule = { ...preSchedule, assignments: scheduleData.prevAssignments };
-        const result = ScoringService.calculate(scheduleData, staffList, unitSettings, fullPreSchedule);
-        this.state.scoreResult = result;
-        const el = document.getElementById('score-display');
-        if(el) {
-            el.textContent = result.totalScore;
-            el.className = `h4 mb-0 fw-bold ${result.totalScore>=80?'text-success':(result.totalScore>=60?'text-warning':'text-danger')}`;
+        const scoreResult = ScoringService.calculate(scheduleData, staffList, unitSettings, preSchedule);
+        this.state.scoreResult = scoreResult;
+        
+        // 更新評分顯示
+        const scoreDisplay = document.getElementById('score-display');
+        if (scoreDisplay) {
+            scoreDisplay.textContent = `${scoreResult.totalScore} 分`;
+            scoreDisplay.className = `badge fs-6 ${scoreResult.passed ? 'bg-success' : 'bg-warning'}`;
         }
     }
 
-    showScoreDetails() {
-        if (!this.state.scoreResult) return alert("尚未計算分數");
-        const details = this.state.scoreResult.details;
-        let html = '<div class="accordion" id="scoreAccordion">';
-        Object.entries(details).forEach(([key, cat], idx) => {
-             html += `
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button ${idx===0?'':'collapsed'}" type="button" data-bs-toggle="collapse" data-bs-target="#c-${key}">
-                            <div class="d-flex w-100 justify-content-between me-3 align-items-center">
-                                <span>${cat.label}</span>
-                                <span class="badge bg-primary rounded-pill">${Math.round(cat.score)}分</span>
+    openScoreModal(versionIndex = -1) {
+        const scoreResult = versionIndex === -1 ? this.state.scoreResult : this.generatedVersions[versionIndex].scoreResult;
+        if (!scoreResult) return;
+
+        const body = document.getElementById('score-modal-body');
+        let html = `<div class="row">`;
+        
+        Object.keys(scoreResult.details).forEach(key => {
+            const detail = scoreResult.details[key];
+            const colorMap = { fairness: 'primary', regularity: 'warning', satisfaction: 'info', efficiency: 'success', cost: 'secondary' };
+            const color = colorMap[key] || 'secondary';
+            
+            html += `
+                <div class="col-md-6 mb-4">
+                    <div class="card border-left-${color} shadow h-100">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs fw-bold text-${color} text-uppercase mb-1">${detail.label}</div>
+                                    <div class="h5 mb-0 fw-bold text-gray-800">${detail.score} / ${detail.max} 分</div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                                </div>
                             </div>
-                        </button>
-                    </h2>
-                    <div id="c-${key}" class="accordion-collapse collapse ${idx===0?'show':''}">
-                        <div class="accordion-body">
-                            <ul class="list-group list-group-flush">
-                                ${cat.subItems ? cat.subItems.map(item => `
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div><span>${item.name}</span><small class="text-muted d-block" style="font-size:0.75rem">${item.desc || ''}</small></div>
-                                        <span>${item.value} <span class="badge bg-secondary">${item.grade}</span></span>
-                                    </li>`).join('') : '<li class="list-group-item text-muted">無細項</li>'}
+                            <hr class="my-2">
+                            <ul class="list-unstyled small">
+                                ${detail.subItems.map(item => `
+                                    <li>
+                                        <span class="fw-bold">${item.name}:</span> 
+                                        <span class="float-end">${item.value} (${item.grade})</span>
+                                    </li>
+                                `).join('')}
                             </ul>
                         </div>
                     </div>
-                </div>`;
+                </div>
+            `;
         });
-        html += '</div>';
-        document.getElementById('score-details-body').innerHTML = html;
+        
+        html += `</div>`;
+        body.innerHTML = html;
         this.scoreModal.show();
     }
 
-    async resetToPreSchedule(showConfirm = true) {
-        if(showConfirm && !confirm("確定重置？將清除所有已排班別。")) return;
-        const loading = document.getElementById('loading-indicator');
-        if(loading) loading.style.display = 'block';
-        try {
-            const preSchedule = await PreScheduleService.getPreSchedule(this.state.currentUnitId, this.state.year, this.state.month);
-            const newAssignments = {};
-            this.state.staffList.forEach(s => { newAssignments[s.uid] = {}; });
-            if (preSchedule && preSchedule.submissions) {
-                Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
-                    if(sub.wishes && newAssignments[uid]) {
-                        Object.entries(sub.wishes).forEach(([d, w]) => { newAssignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w); });
-                    }
-                });
-            }
-            this.state.scheduleData.assignments = newAssignments;
-            await ScheduleService.updateAllAssignments(this.state.currentUnitId, this.state.year, this.state.month, newAssignments, this.state.scheduleData.prevAssignments);
-            this.renderGrid();
-            this.updateScoreDisplay();
-            if(showConfirm) alert("✅ 已重置。");
-        } catch(e) { console.error(e); alert("重置失敗"); } finally { if(loading) loading.style.display = 'none'; }
-    }
-
-    async togglePublish() {
-        if(!this.state.scheduleData) return;
-        const currentStatus = this.state.scheduleData.status;
-        const newStatus = currentStatus === 'published' ? 'draft' : 'published';
-        if(confirm(`確定要 ${newStatus==='published'?'發布':'撤回'} 嗎？`)) {
-            await ScheduleService.updateStatus(this.state.currentUnitId, this.state.year, this.state.month, newStatus);
-            this.state.scheduleData.status = newStatus;
-            this.updateStatusBadge();
-            alert(`班表已${newStatus==='published'?'發布':'撤回'}`);
+    // --- AI 排班相關 ---
+    async openVersionsModal() {
+        const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
+        if (!scheduleData || !unitSettings || !preSchedule) {
+            alert('資料尚未載入完成，請稍後再試。');
+            return;
         }
-    }
-
-    updateStatusBadge() {
-        const badge = document.getElementById('schedule-status-badge');
-        const btn = document.getElementById('btn-publish');
-        if(!badge || !this.state.scheduleData) return;
-        const status = this.state.scheduleData.status;
-        if (status === 'published') {
-            badge.className = 'badge bg-success'; badge.textContent = '已發布';
-            if(btn) { btn.textContent = '撤回班表'; btn.classList.replace('btn-success', 'btn-warning'); }
-        } else {
-            badge.className = 'badge bg-secondary'; badge.textContent = '草稿';
-            if(btn) { btn.textContent = '發布班表'; btn.classList.replace('btn-warning', 'btn-success'); }
-        }
-    }
-
-    async runMultiVersionAI() {
-        if (!confirm("確定執行智慧排班？\n系統將平行運算三種策略：\n1. 數值平衡 (A)\n2. 願望優先 (B)\n3. 規律作息 (C)")) return;
         
+        const modalBody = document.getElementById('versions-modal-body');
+        modalBody.innerHTML = `<div class="text-center p-5"><i class="fas fa-spinner fa-spin fa-3x"></i><p class="mt-3">AI 正在努力排班中，請稍候...</p></div>`;
         this.versionsModal.show();
-        const progressBar = document.getElementById('ai-progress-bar');
-        const progressText = document.getElementById('ai-progress-text');
-        const tabList = document.getElementById('versionTabs');
-        const tabContent = document.getElementById('versionTabContent');
-        const progressContainer = document.getElementById('ai-progress-container');
 
-        progressContainer.style.display = 'block';
-        tabList.style.display = 'none';
-        tabContent.style.display = 'none';
-        progressBar.style.width = '0%';
+        this.generatedVersions = [];
+        const strategies = ['A', 'B', 'C']; // 策略 A, B, C
 
-        try {
-            this.generatedVersions = [];
+        for (let i = 0; i < strategies.length; i++) {
+            const strategyCode = strategies[i];
+            const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, preSchedule, strategyCode);
             
-            let prevY = this.state.year, prevM = this.state.month - 1;
-            if(prevM===0) { prevM=12; prevY--; }
+            // 計算評分
+            const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
             
-            let preScheduleData = { 
-                assignments: this.state.scheduleData.prevAssignments || {},
-                submissions: {} 
-            };
-            try {
-                const rawPre = await PreScheduleService.getPreSchedule(this.state.currentUnitId, this.state.year, this.state.month);
-                if(rawPre) preScheduleData.submissions = rawPre.submissions;
-            } catch(e) {}
-
-            const versions = [
-                { code: 'A', name: '方案 A：數值平衡 (公平優先)' },
-                { code: 'B', name: '方案 B：願望優先 (滿意度高)' },
-                { code: 'C', name: '方案 C：規律作息 (減少換班)' }
-            ];
-            
-            for (let i = 0; i < 3; i++) {
-                const ver = versions[i];
-                const percent = Math.round(((i+1) / 3) * 100);
-                progressBar.style.width = `${percent}%`;
-                progressText.textContent = `正在運算 ${ver.name}...`;
-                
-                const result = await AutoScheduler.run(
-                    this.state.scheduleData, 
-                    this.state.staffList, 
-                    this.state.unitSettings, 
-                    preScheduleData,
-                    ver.code
-                );
-                
-                const scoreData = { ...this.state.scheduleData, assignments: result.assignments };
-                const scoreRes = ScoringService.calculate(scoreData, this.state.staffList, this.state.unitSettings, preScheduleData);
-                
-                this.generatedVersions.push({ 
-                    id: i + 1, 
-                    assignments: result.assignments, 
-                    score: scoreRes,
-                    label: ver.name,
-                    logs: result.logs
-                });
-                
-                await new Promise(r => setTimeout(r, 100));
-            }
-
-            progressContainer.style.display = 'none';
-            tabList.style.display = 'flex';
-            tabContent.style.display = 'block';
-            this.renderVersionsModal();
-
-        } catch (e) { 
-            console.error(e);
-            alert("演算失敗: " + e.message); 
-            this.versionsModal.hide();
+            this.generatedVersions.push({
+                strategyCode,
+                assignments: result.assignments,
+                scoreResult,
+                logs: result.logs
+            });
         }
+
+        this.renderVersions();
     }
 
-    renderVersionsModal() {
-        this.generatedVersions.forEach((v, idx) => {
-            const tabPane = document.getElementById(`v${v.id}`);
-            if(!tabPane) return;
-            
-            const scoreColor = v.score.totalScore >= 80 ? 'text-success' : (v.score.totalScore >= 60 ? 'text-warning' : 'text-danger');
-            
-            let previewHtml = `
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <div>
-                        <h4 class="${scoreColor} fw-bold mb-0">${v.score.totalScore} 分</h4>
-                        <small class="text-muted">策略偏好：${v.label}</small>
-                    </div>
-                    <button class="btn btn-primary" onclick="window.routerPage.applyVersion(${idx})">
-                        <i class="bi bi-check-lg"></i> 套用此版本
+    renderVersions() {
+        const modalBody = document.getElementById('versions-modal-body');
+        
+        let navHtml = `<ul class="nav nav-tabs" id="versionTabs" role="tablist">`;
+        let contentHtml = `<div class="tab-content" id="versionTabContent">`;
+
+        this.generatedVersions.forEach((version, index) => {
+            const isActive = index === 0;
+            const strategyMap = {
+                'A': '方案 A: 數值平衡 (公平優先)',
+                'B': '方案 B: 願望優先 (滿意度高)',
+                'C': '方案 C: 規律作息 (減少換班)'
+            };
+            const strategyName = strategyMap[version.strategyCode] || `版本 ${index + 1}`;
+            const score = version.scoreResult.totalScore;
+            const scoreClass = version.scoreResult.passed ? 'bg-success' : 'bg-warning';
+
+            navHtml += `
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link ${isActive ? 'active' : ''}" id="version-${index}-tab" data-bs-toggle="tab" data-bs-target="#version-${index}" type="button" role="tab">
+                        版本 ${index + 1} <span class="badge ${scoreClass} ms-2">${score} 分</span>
                     </button>
-                </div>
-                <div class="table-responsive border rounded" style="max-height: 400px;">
-                    <table class="table table-sm table-bordered text-center mb-0" style="font-size:0.8rem;">
-                        <thead class="bg-light sticky-top">
-                            <tr>
-                                <th style="background:#fff; z-index:20;">人員</th>
-                                ${Array.from({length:this.state.daysInMonth},(_,i)=>`<th>${i+1}</th>`).join('')}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${this.state.staffList.map(s => `
-                                <tr>
-                                    <td class="fw-bold bg-white sticky-col first-col" style="left:0;">${s.name}</td>
-                                    ${Array.from({length:this.state.daysInMonth},(_,i)=>{
-                                        const val = v.assignments[s.uid]?.[i+1] || '';
-                                        let bg = '#fff', color = '#000';
-                                        if(val==='OFF'||val==='M_OFF') { bg='#f0f0f0'; color='#ccc'; }
-                                        else if(val==='N') { bg='#343a40'; color='#fff'; }
-                                        else if(val==='E') { bg='#ffc107'; color='#000'; }
-                                        else if(val==='D') { bg='#fff'; color='#0d6efd'; }
-                                        
-                                        return `<td style="background:${bg};color:${color}">${val}</td>`;
-                                    }).join('')}
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-                <div class="mt-3">
-                    <h6 class="fw-bold border-bottom pb-2">評分細節</h6>
-                    <div class="row g-2">
-                        ${Object.values(v.score.details).map(d => 
-                            `<div class="col-6 col-md-4">
-                                <div class="d-flex justify-content-between border rounded p-2 bg-light">
-                                    <span class="small">${d.label}</span> 
-                                    <span class="fw-bold ${d.score < d.max * 0.6 ? 'text-danger' : 'text-success'}">
-                                        ${Math.round(d.score)} / ${d.max}
-                                    </span>
-                                </div>
-                             </div>`
-                        ).join('')}
+                </li>
+            `;
+
+            contentHtml += `
+                <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="version-${index}" role="tabpanel">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold text-primary">${score} 分</h5>
+                        <span class="badge bg-secondary">${strategyName}</span>
+                        <button class="btn btn-primary btn-sm" onclick="window.routerPage.applyVersion(${index})">套用此版本</button>
                     </div>
+                    ${this.renderVersionTable(version.assignments, version.scoreResult)}
                 </div>
             `;
-            
-            tabPane.innerHTML = previewHtml;
         });
+
+        navHtml += `</ul>`;
+        contentHtml += `</div>`;
+
+        modalBody.innerHTML = navHtml + contentHtml;
     }
 
-    async applyVersion(index) {
-        const selected = this.generatedVersions[index];
-        if (!selected) return;
+    renderVersionTable(assignments, scoreResult) {
+        const { staffList, daysInMonth, unitSettings } = this.state;
+        
+        let html = `<div class="schedule-table-wrapper" style="max-height: 50vh;">
+            <table class="table table-bordered schedule-grid mb-0">
+                <thead id="version-thead">
+                    ${this.renderHeader(daysInMonth)}
+                </thead>
+                <tbody>
+                    ${staffList.map(staff => this.renderStaffRow(staff, assignments[staff.uid] || {}, daysInMonth, unitSettings)).join('')}
+                    ${this.renderStatsRow(daysInMonth, assignments, unitSettings)}
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-3">
+            <h6 class="fw-bold">評分細節 <button class="btn btn-sm btn-outline-success ms-2" onclick="window.routerPage.openScoreModal(${this.generatedVersions.findIndex(v => v.assignments === assignments)})">查看完整評分</button></h6>
+            ${this.renderScoreSummary(scoreResult)}
+        </div>
+        `;
+        return html;
+    }
 
-        if(!confirm(`確定套用「版本 ${selected.id} (${selected.score.totalScore}分)」？\n這將覆蓋目前的排班表內容。`)) return;
+    renderScoreSummary(scoreResult) {
+        let html = `<div class="row g-2 small">`;
+        Object.keys(scoreResult.details).forEach(key => {
+            const detail = scoreResult.details[key];
+            const colorMap = { fairness: 'primary', regularity: 'warning', satisfaction: 'info', efficiency: 'success', cost: 'secondary' };
+            const color = colorMap[key] || 'secondary';
+            
+            html += `
+                <div class="col-md-3">
+                    <span class="badge bg-${color}">${detail.label}</span>
+                    <span class="fw-bold ms-1">${detail.score} / ${detail.max}</span>
+                </div>
+            `;
+        });
+        html += `</div>`;
+        return html;
+    }
 
-        const loading = document.getElementById('loading-indicator');
-        if(loading) loading.style.display = 'block';
+    applyVersion(index) {
+        const version = this.generatedVersions[index];
+        if (version) {
+            this.state.scheduleData.assignments = version.assignments;
+            this.state.scheduleData.version = this.state.scheduleData.version + 1;
+            this.state.scheduleData.activeVersion = this.state.scheduleData.version;
+            this.versionsModal.hide();
+            this.renderSchedule();
+            alert(`已套用版本 ${index + 1}。請記得儲存排班。`);
+        }
+    }
+
+    // --- 儲存與設定 ---
+    async saveSchedule() {
+        const { scheduleData, currentUnitId, year, month } = this.state;
+        if (!scheduleData) return;
 
         try {
-            this.state.scheduleData.assignments = JSON.parse(JSON.stringify(selected.assignments));
-            
-            await ScheduleService.updateAllAssignments(
-                this.state.currentUnitId, 
-                this.state.year, 
-                this.state.month, 
-                this.state.scheduleData.assignments,
-                this.state.scheduleData.prevAssignments
-            );
-
-            this.versionsModal.hide();
-            this.renderGrid();
-            this.updateScoreDisplay();
-            
-            alert(`✅ 已成功套用版本 ${selected.id}！`);
-        } catch(e) {
-            console.error(e);
-            alert("套用失敗: " + e.message);
-        } finally {
-            if(loading) loading.style.display = 'none';
+            await ScheduleService.saveSchedule(currentUnitId, year, month, scheduleData);
+            alert('排班表已成功儲存！');
+        } catch (e) {
+            alert('儲存失敗: ' + e.message);
         }
+    }
+    
+    openSettingsModal() {
+        // 由於 RuleSettings 已經被重構成一個獨立的頁面，這裡應該導向該頁面
+        // 或者，如果 RuleSettings 是一個 Modal，則需要實例化並顯示
+        // 根據 RuleSettings.js 的內容，它是一個 Modal 內容的渲染器
+        
+        const { currentUnitId } = this.state;
+        if (!currentUnitId) return;
+        
+        // 假設 RuleSettings 是一個 Modal 內容的渲染器
+        import('../settings/RuleSettings.js').then(({ RuleSettings }) => {
+            const ruleSettings = new RuleSettings(currentUnitId);
+            ruleSettings.loadSettings().then(() => {
+                const modalContent = document.querySelector('#settings-modal .modal-content');
+                modalContent.innerHTML = ruleSettings.render();
+                ruleSettings.attachEvents();
+                this.settingsModal.show();
+            });
+        });
     }
 }
