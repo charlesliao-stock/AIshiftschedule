@@ -104,6 +104,8 @@ export class AutoScheduler {
                 allowed = ['N', 'OFF'];
             } else if (!monthlyBatch && staticFixed === 'E') {
                 allowed = ['E', 'OFF'];
+            } else if (!monthlyBatch && staticFixed === 'D') { // <-- 新增對固定 D 班的處理
+                allowed = ['D', 'OFF'];
             } else {
                 allowed = ['D', 'E', 'N', 'OFF'];
             }
