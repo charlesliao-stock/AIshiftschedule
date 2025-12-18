@@ -9,7 +9,7 @@ export class UnitService {
     static COLLECTION_NAME = 'units';
     
     // ✅ 新增：快取容器
-    static _cache = new Map();
+    static _cache = new Map( );
     static CACHE_DURATION = 300000; // 5分鐘 (毫秒)
 
     // ✅ 新增：帶快取的讀取方法 (用於 AI 排班等頻繁讀取場景)
@@ -99,6 +99,30 @@ export class UnitService {
             const docSnap = await getDoc(doc(db, UnitService.COLLECTION_NAME, unitId));
             return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
         } catch (error) { return null; }
+    }
+
+    // 新增：取得單位設定 (用於 RuleSettings)
+    static async getUnitSettings(unitId) {
+        const unit = await this.getUnitByIdWithCache(unitId);
+        if (unit && unit.settings) {
+            return unit.settings;
+        }
+        // 返回預設結構，防止 RuleSettings 崩潰
+        return { rules: {}, strategyWeights: {}, strategyPreset: 'A' };
+    }
+
+    // 新增：更新單位設定 (用於 RuleSettings)
+    static async updateUnitSettings(unitId, newSettings) {
+        try {
+            // 由於 Firestore 支援巢狀欄位更新，我們可以直接更新 settings 欄位
+            const updateData = {
+                settings: newSettings
+            };
+            const result = await this.updateUnit(unitId, updateData);
+            return result;
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
     }
 
     static async getUnitsByManager(managerId) {
