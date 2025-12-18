@@ -218,7 +218,7 @@ export class PreScheduleSubmitPage {
             const currentMix = document.querySelector('input[name="monthlyMix"]:checked')?.value || '2';
             this.updatePriorityVisibility(currentMix);
         }
-
+        
         if(disabled) {
             document.querySelectorAll('#preference-container input, #preference-container select').forEach(el => el.disabled = true);
         }
@@ -443,8 +443,10 @@ export class PreScheduleSubmitPage {
         const allow3 = settings.allowThreeTypesVoluntary !== false; 
         const limit = settings.shiftTypesLimit || 2;
         
+        let batchPref = ""; // ✅ 修正：將 batchPref 定義在頂部
+
         if (canBatch) {
-            const batchPref = document.querySelector('input[name="batchPref"]:checked')?.value || "";
+            batchPref = document.querySelector('input[name="batchPref"]:checked')?.value || "";
             preferences.batch = batchPref;
         }
 
