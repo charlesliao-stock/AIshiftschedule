@@ -6,7 +6,7 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Correct Rules Passing)`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Fix Blank Issue)`);
         const startTime = Date.now();
 
         try {
@@ -21,7 +21,10 @@ export class AutoScheduler {
             this.prefillFixedShifts(context);
 
             for (let day = 1; day <= context.daysInMonth; day++) {
-                if (Date.now() - startTime > MAX_RUNTIME) break;
+                if (Date.now() - startTime > MAX_RUNTIME) {
+                    context.logs.push("⚠️ 運算超時");
+                    break;
+                }
                 if (day > 1) this.retroactiveBalance(day - 1, context);
                 await this.solveDay(day, context);
             }
@@ -29,11 +32,11 @@ export class AutoScheduler {
             if (context.daysInMonth > 0) this.retroactiveBalance(context.daysInMonth, context);
 
             const duration = (Date.now() - startTime) / 1000;
-            context.logs.push(`策略 ${strategyCode} 完成 (${duration}s)`);
+            context.logs.push(`完成 (${duration}s)`);
             return { assignments: context.assignments, logs: context.logs };
 
         } catch (e) {
-            console.error(e);
+            console.error("AutoScheduler Error:", e);
             return { assignments: {}, logs: [`Error: ${e.message}`] };
         }
     }
@@ -47,16 +50,18 @@ export class AutoScheduler {
         const historyAssignments = preScheduleData.assignments || {};
         const preScheduledOffs = {}; 
 
-        // 讀取設定檔
+        // 安全讀取設定
         const rules = unitSettings.settings?.rules || {};
+        const constraints = rules.constraints || {};
         const strategyWeights = unitSettings.settings?.strategyWeights || {}; 
         
         const globalMax = rules.maxConsecutiveWork || 6;
-        const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
+        const allowLongLeave = constraints.allowLongLeaveException || false;
         const rebalanceLoop = rules.rebalanceLoop || 3;
         
-        // 確保月班種上限有被讀取
-        const monthlyLimit = rules.constraints?.monthlyShiftLimit || 2;
+        // ✅ 確保有值，預設 2
+        const monthlyLimit = constraints.monthlyShiftLimit ? parseInt(constraints.monthlyShiftLimit) : 2;
+        
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
         staffList.forEach(s => {
@@ -135,38 +140,16 @@ export class AutoScheduler {
             lastMonthConsecutive,
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq,
-            // 這裡將完整 rules 傳遞給 context，包含 monthlyShiftLimit
-            rules: { ...rules, rebalanceLoop, monthlyLimit }, 
+            rules: { ...rules, constraints, rebalanceLoop, monthlyLimit }, // 傳入完整規則
             weights: strategyWeights, 
             logs: [],
             startTime: Date.now()
         };
     }
 
-    static calculateLeaveQuotas(context) {
-        let totalReq = 0;
-        for (let d = 1; d <= context.daysInMonth; d++) {
-            const w = new Date(context.year, context.month - 1, d).getDay();
-            totalReq += (context.staffReq.D[w]||0) + (context.staffReq.E[w]||0) + (context.staffReq.N[w]||0);
-        }
-        const totalCapacity = context.staffList.length * context.daysInMonth;
-        const avgOff = Math.floor((totalCapacity - totalReq) / context.staffList.length);
-        context.targetAvgOff = avgOff;
-    }
-
-    static prefillFixedShifts(context) {
-        Object.entries(context.whitelists).forEach(([uid, allowed]) => {
-            const workingShift = allowed.find(s => s !== 'OFF');
-            if (allowed.length === 2 && workingShift) {
-                for (let d = 1; d <= context.daysInMonth; d++) {
-                    if (!context.assignments[uid][d]) {
-                        context.assignments[uid][d] = workingShift;
-                        context.stats[uid][workingShift] = (context.stats[uid][workingShift]||0) + 1;
-                    }
-                }
-            }
-        });
-    }
+    // ... (calculateLeaveQuotas, prefillFixedShifts 保持不變) ...
+    static calculateLeaveQuotas(context) { /*...*/ let t=0;for(let d=1;d<=context.daysInMonth;d++){const w=new Date(context.year,context.month-1,d).getDay();t+=(context.staffReq.D[w]||0)+(context.staffReq.E[w]||0)+(context.staffReq.N[w]||0);}const c=context.staffList.length*context.daysInMonth;context.targetAvgOff=Math.floor((c-t)/context.staffList.length); }
+    static prefillFixedShifts(context) { /*...*/ Object.entries(context.whitelists).forEach(([u,a])=>{const w=a.find(s=>s!=='OFF');if(a.length===2&&w){for(let d=1;d<=context.daysInMonth;d++){if(!context.assignments[u][d]){context.assignments[u][d]=w;context.stats[u][w]=(context.stats[u][w]||0)+1;}}}}); }
 
     static async solveDay(day, context) {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
@@ -195,7 +178,7 @@ export class AutoScheduler {
         for (const item of candidates) {
             const shift = item.shift;
             
-            // 檢查月班種上限 (使用 context.rules 中的設定)
+            // ✅ 修正：確保月限制被檢查，且傳入正確數值
             if (RuleEngine.willViolateMonthlyLimit(context.assignments[uid], shift, day, context.rules.monthlyLimit)) {
                 continue;
             }
@@ -203,11 +186,9 @@ export class AutoScheduler {
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
-            // ✅ 關鍵修正：傳入 context.rules，而非寫死的物件
-            // 這樣 RuleEngine 才能讀到 monthlyShiftLimit, maxConsecutive 等完整設定
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], day, context.shiftDefs, 
-                context.rules, // <--- 修正處
+                context.rules, // 傳入完整規則
                 staff.constraints, context.assignments[uid][0], context.lastMonthConsecutive[uid], day
             );
 
@@ -265,8 +246,8 @@ export class AutoScheduler {
                     let trimmed = 0;
                     for (const staff of candidates) {
                         if (trimmed >= excess) break;
-                        const subWishes = preScheduleData.submissions?.[staff.uid]?.wishes || {};
-                        if (subWishes[day] === sh) continue; 
+                        const subWishes = context.preScheduledOffs[staff.uid] || {};
+                        if (subWishes[day]) continue; 
 
                         const allowed = context.whitelists[staff.uid];
                         if (allowed.length === 2 && allowed.includes(sh)) continue;
@@ -306,11 +287,10 @@ export class AutoScheduler {
                             continue;
                         }
 
-                        // ✅ 關鍵修正：傳入 context.rules
                         const valid = RuleEngine.validateStaff(
                             { ...context.assignments[staff.uid], [day]: sh }, 
                             day, context.shiftDefs, 
-                            context.rules, // <--- 修正處
+                            context.rules, 
                             staff.constraints, context.assignments[staff.uid][0], context.lastMonthConsecutive[staff.uid], day
                         );
                         if (valid.errors[day]) continue;
