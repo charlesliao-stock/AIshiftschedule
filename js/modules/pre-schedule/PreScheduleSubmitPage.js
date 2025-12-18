@@ -467,6 +467,25 @@ export class PreScheduleSubmitPage {
         const unique = new Set(selected);
         if (selected.length !== unique.size) { alert("偏好順序請勿選擇重複的班別"); return; }
 
+        // 1. 驗證：包班意願與排班偏好順序的衝突
+        if (canBatch && batchPref !== "") {
+            const batchShift = batchPref === "包小夜" ? "E" : "N";
+            const conflictingShift = batchShift === "E" ? "N" : "E";
+            
+            if (selected.includes(conflictingShift)) {
+                alert(`錯誤：您選擇了 ${batchPref}，但排班偏好順序中包含了 ${conflictingShift} 班。兩者互相矛盾，請修正。`);
+                return;
+            }
+        }
+
+        // 2. 驗證：排班偏好順序中不能同時選兩種夜班 (E, N)
+        const hasE = selected.includes("E");
+        const hasN = selected.includes("N");
+        if (hasE && hasN) {
+            alert("錯誤：排班偏好順序中不能同時選擇小夜 (E) 和大夜 (N) 兩種夜班。請修正。");
+            return;
+        }
+
         preferences.priority1 = p1;
         preferences.priority2 = p2;
         // 修正：僅當 P3 顯示時才儲存
