@@ -120,7 +120,7 @@ export class AutoScheduler {
             preferences[uid] = {
                 p1: pref.priority1,
                 p2: pref.priority2,
-                p3: pref.priority3
+                p3: pref.priority3 // 確保 p3 存在，即使為 null/undefined
             };
         });
 
@@ -255,6 +255,11 @@ export class AutoScheduler {
                 const req = context.staffReq[sh]?.[w] || 0;
                 if (counts[sh] > req) {
                     const excess = counts[sh] - req;
+                    // 修正: 確保不會將所有超編人員都轉為 OFF，要考慮當日 OFF 的需求
+                    const offReq = context.staffList.length - (context.staffReq.D[w]||0) - (context.staffReq.E[w]||0) - (context.staffReq.N[w]||0);
+                    const currentOff = staffByShift.OFF.length;
+                    const maxToTrim = Math.max(0, offReq - currentOff);
+                    const actualExcess = Math.min(excess, maxToTrim);
                     const candidates = staffByShift[sh].sort((a, b) => {
                         const defA = context.targetAvgOff - context.stats[a.uid].OFF;
                         const defB = context.targetAvgOff - context.stats[b.uid].OFF;
@@ -263,7 +268,7 @@ export class AutoScheduler {
 
                     let trimmed = 0;
                     for (const staff of candidates) {
-                        if (trimmed >= excess) break;
+                        if (trimmed >= actualExcess) break;
                         
                         // ✅ 修正：改用 context.preScheduleData
                         const subWishes = context.preScheduleData.submissions?.[staff.uid]?.wishes || {};
