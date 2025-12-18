@@ -3,23 +3,28 @@ import { AI_SCORING_CONFIG } from "../../config/AI_SCORING_CONFIG.js";
 
 export class RuleSettings {
     constructor(unitId) {
+        console.log('RuleSettings: 1. Constructor called.');
         this.unitId = unitId;
         this.unitSettings = null;
     }
 
     async init() {
+        console.log('RuleSettings: 2. init() called.');
         await this.loadSettings();
     }
 
     async loadSettings() {
+        console.log('RuleSettings: 3. loadSettings() started.');
         this.unitSettings = await UnitService.getUnitSettings(this.unitId);
         if (!this.unitSettings.rules) this.unitSettings.rules = {};
         // 確保 strategyWeights 存在，如果沒有則使用預設 A 方案
         if (!this.unitSettings.strategyWeights) this.unitSettings.strategyWeights = AI_SCORING_CONFIG.STRATEGY_WEIGHTS.A; 
         if (!this.unitSettings.strategyPreset) this.unitSettings.strategyPreset = 'A';
+        console.log('RuleSettings: 4. loadSettings() finished. unitSettings:', this.unitSettings);
     }
 
     render() {
+        console.log('RuleSettings: 5. render() called. unitSettings is null:', this.unitSettings === null);
         if (!this.unitSettings) {
             return `<div class="modal-body text-center py-5">載入中...</div>`;
         }
