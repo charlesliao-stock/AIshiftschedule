@@ -35,13 +35,12 @@ export class RuleSettings {
                     // 載入完成後，強制重新渲染 Modal 內容
                     const modalContent = document.querySelector('#settings-modal .modal-content');
                     if (modalContent) {
-                        console.log('RuleSettings: 7. Data loaded, forcing modal re-render.');
-                        // 這裡不能直接呼叫 this.render()，因為 this.render() 會返回 HTML 字串，
-                        // 且會再次檢查 this.unitSettings，但這次會成功。
-                        // 為了確保 attachEvents 被呼叫，我們需要將 render() 的結果賦值給 innerHTML
-                        // 並在之後呼叫 attachEvents()。
-                        modalContent.innerHTML = this.render();
-                        this.attachEvents();
+                        // 載入完成後，強制重新渲染 Modal 內容
+                        // 使用 setTimeout 確保 DOM 元素已完全準備好 (解決競態條件)
+                        setTimeout(() => {
+                            modalContent.innerHTML = this.render();
+                            this.attachEvents();
+                        }, 50);
                     }
                 }).catch(error => {
                     console.error('RuleSettings: Error during init and re-render:', error);
