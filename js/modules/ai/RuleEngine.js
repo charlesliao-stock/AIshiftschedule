@@ -1,23 +1,21 @@
 export class RuleEngine {
 
     /**
-     * 驗證單一員工 (包含月班種限制)
+     * 驗證單一員工
      */
     static validateStaff(assignments, daysInMonth, shiftDefs, rules, staffConstraints = {}, lastMonthLastShift = 'OFF', lastMonthConsecutive = 0, checkUpToDay = null) {
         const errors = {};
         const safeAssignments = assignments || {};
         const limitDay = checkUpToDay || daysInMonth;
 
-        // 1. 讀取規則
         const maxConsecutive = staffConstraints.calculatedMaxConsecutive || staffConstraints.maxConsecutive || rules.maxConsecutiveWork || 6;
         const maxNight = staffConstraints.maxConsecutiveNights || rules.constraints?.maxConsecutiveNight || 4;
         const isProtected = !!staffConstraints.isPregnant || !!staffConstraints.isPostpartum;
         const minIntervalMins = (rules.constraints?.minInterval11h !== false) ? 660 : 0; 
         
-        // 月班種上限 (預設 2 種)
+        // 這裡會讀取傳入的 rules，若 AutoScheduler 傳對了，這裡就會是動態的
         const monthlyTypeLimit = rules.constraints?.monthlyShiftLimit || 2;
 
-        // 建立時間查詢表
         const shiftMap = {};
         if (shiftDefs) {
             shiftDefs.forEach(s => {
@@ -30,12 +28,10 @@ export class RuleEngine {
             });
         }
 
-        // 變數初始化
         let consecutiveDays = lastMonthConsecutive;
         let consecutiveNights = (lastMonthLastShift === 'N') ? 1 : 0; 
         let prevShift = lastMonthLastShift;
         
-        // 用於統計本月已出現的班別 (D, E, N)
         const usedShifts = new Set(); 
 
         for (let d = 1; d <= limitDay; d++) {
@@ -43,39 +39,38 @@ export class RuleEngine {
             const isWorking = shift !== 'OFF' && shift !== 'M_OFF';
             const prevIsWorking = prevShift !== 'OFF' && prevShift !== 'M_OFF';
 
-            // 收集班別種類 (排除 OFF)
             if (isWorking) usedShifts.add(shift);
 
-            // A. 連續上班天數檢查
+            // A. 連續上班
             if (isWorking) consecutiveDays++; else consecutiveDays = 0;
             if (consecutiveDays > maxConsecutive) {
-                errors[d] = `連${consecutiveDays} (上限${maxConsecutive})`;
+                errors[d] = `連${consecutiveDays}`;
             }
 
-            // B. 連續夜班檢查
+            // B. 連續夜班
             if (shift === 'N') consecutiveNights++; else consecutiveNights = 0;
             if (consecutiveNights > maxNight) {
-                errors[d] = `連夜${consecutiveNights} (上限${maxNight})`;
+                errors[d] = `連夜${consecutiveNights}`;
             }
 
             // C. 母性保護
             if (isProtected && (shift === 'N' || shift === 'E')) {
-                errors[d] = "懷孕/哺乳不可夜班";
+                errors[d] = "孕/哺禁夜";
             }
 
-            // D. 休息間隔 11 小時
+            // D. 11小時
             if (minIntervalMins > 0 && prevIsWorking && isWorking) {
                 const t1 = shiftMap[prevShift];
                 const t2 = shiftMap[shift];
                 if (t1 && t2) {
                     let interval = (1440 - t1.end) + t2.start;
                     if (interval < minIntervalMins) {
-                        errors[d] = `間隔不足 (${Math.floor(interval/60)}h)`;
+                        errors[d] = `間隔不足`;
                     }
                 }
             }
 
-            // E. 大夜銜接 (防逆向)
+            // E. 防逆向
             if (shift === 'N') {
                 if (prevShift !== 'N' && prevShift !== 'OFF' && prevShift !== 'M_OFF') {
                     errors[d] = "大夜前需OFF"; 
@@ -85,25 +80,23 @@ export class RuleEngine {
             prevShift = shift;
         }
 
-        // F. 檢查月班種數量 (事後驗證)
+        // F. 月班種檢查
         if (usedShifts.size > monthlyTypeLimit) {
-            errors['monthly'] = `班種${usedShifts.size}種 (上限${monthlyTypeLimit})`;
+            errors['monthly'] = `班種>${monthlyTypeLimit}`;
         }
 
         return { errors };
     }
 
     /**
-     * 輔助方法：檢查單日填入某班別後，是否會違反月上限
-     * (供 AutoScheduler 在填入前預判)
+     * 預判是否會違反月上限
      */
     static willViolateMonthlyLimit(currentAssignments, newShift, day, monthlyTypeLimit) {
         if (newShift === 'OFF' || newShift === 'M_OFF') return false;
         
         const used = new Set();
-        used.add(newShift); // 加入新班別
+        used.add(newShift);
 
-        // 掃描已排的班別
         Object.values(currentAssignments).forEach(s => {
             if (s && s !== 'OFF' && s !== 'M_OFF') used.add(s);
         });
