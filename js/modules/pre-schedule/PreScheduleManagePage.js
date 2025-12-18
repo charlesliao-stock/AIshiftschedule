@@ -309,7 +309,7 @@ export class PreScheduleManagePage {
                         isSupport: fresh.unitId !== this.targetUnitId
                     };
                 }
-                return s; // 若該員已被刪除，保留舊資料或移除視需求而定，此處保留
+                return s; // 若該員已被刪除，保留舊資料
             });
             
             this.renderStaffList(this.unitData.groups || []);
@@ -454,7 +454,11 @@ export class PreScheduleManagePage {
     updateStaffGroup(idx, val) { this.selectedStaff[idx].tempGroup = val; }
     removeStaff(idx) { this.selectedStaff.splice(idx, 1); this.renderStaffList(this.unitData.groups || []); }
 
-    renderGroupInputs(groups, values={}) { /*...同前版...*/ const container = document.getElementById('group-limits-container'); if(groups.length===0){container.innerHTML='<div class="text-muted small">無組別</div>';return;} container.innerHTML=`<div class="table-responsive"><table class="table table-bordered table-sm text-center mb-0 align-middle"><thead class="table-light"><tr><th>組別</th><th>每班至少</th><th>小夜至少</th><th>大夜至少</th><th>小夜最多</th><th>大夜最多</th></tr></thead><tbody>${groups.map(g=>{const v=values[g]||{};return `<tr><td class="fw-bold bg-light">${g}</td><td><input type="number" class="form-control form-control-sm text-center g-min-d" data-group="${g}" value="${v.minD??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-e" data-group="${g}" value="${v.minE??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-n" data-group="${g}" value="${v.minN??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-max-e" data-group="${g}" value="${v.maxE??''}" placeholder="不限"></td><td><input type="number" class="form-control form-control-sm text-center g-max-n" data-group="${g}" value="${v.maxN??''}" placeholder="不限"></td></tr>`;}).join('')}</tbody></table></div>`; }
+    renderGroupInputs(groups, values={}) { 
+        const container = document.getElementById('group-limits-container'); 
+        if(groups.length===0){container.innerHTML='<div class="text-muted small">無組別</div>';return;} 
+        container.innerHTML=`<div class="table-responsive"><table class="table table-bordered table-sm text-center mb-0 align-middle"><thead class="table-light"><tr><th>組別</th><th>每班至少</th><th>小夜至少</th><th>大夜至少</th><th>小夜最多</th><th>大夜最多</th></tr></thead><tbody>${groups.map(g=>{const v=values[g]||{};return `<tr><td class="fw-bold bg-light">${g}</td><td><input type="number" class="form-control form-control-sm text-center g-min-d" data-group="${g}" value="${v.minD??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-e" data-group="${g}" value="${v.minE??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-min-n" data-group="${g}" value="${v.minN??0}" min="0"></td><td><input type="number" class="form-control form-control-sm text-center g-max-e" data-group="${g}" value="${v.maxE??''}" placeholder="不限"></td><td><input type="number" class="form-control form-control-sm text-center g-max-n" data-group="${g}" value="${v.maxN??''}" placeholder="不限"></td></tr>`;}).join('')}</tbody></table></div>`; 
+    }
 
     async searchStaff() {
         const keyword = document.getElementById('staff-search').value.trim();
@@ -500,6 +504,7 @@ export class PreScheduleManagePage {
     }
 
     // ... (其餘 importLastMonthSettings, setDefaultDates, handleTypeLimitChange, deletePreSchedule, goToEdit 保持不變)
+    // 為節省篇幅省略，請保留原程式碼 (同上一版)
     async importLastMonthSettings() { /*...*/ }
     setDefaultDates() { /*...*/ }
     handleTypeLimitChange(val) { /*...*/ }
