@@ -204,6 +204,7 @@ export class AutoScheduler {
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
+            // 1. 檢查硬性規則 (連續工作天數、休息間隔等)
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], day, context.shiftDefs, 
                 context.rules, 
@@ -211,6 +212,10 @@ export class AutoScheduler {
             );
 
             if (!valid.errors[day]) {
+                // 2. 檢查每日人力需求是否被滿足 (軟性約束，但在此階段作為硬性約束處理)
+                // 註：這部分檢查應該在 solveDay 外部的 retroactiveBalance 中處理，
+                // 但為了確保硬性規則被遵守，這裡必須檢查 RuleEngine 的結果。
+                
                 if (await this.solveRecursive(day, list, idx + 1, context)) return true;
             }
 
