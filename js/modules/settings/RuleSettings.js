@@ -36,11 +36,11 @@ export class RuleSettings {
                     const modalContent = document.querySelector('#settings-modal .modal-content');
                     if (modalContent) {
                         // 載入完成後，強制重新渲染 Modal 內容
-                        // 使用 setTimeout 確保 DOM 元素已完全準備好 (解決競態條件)
-                        setTimeout(() => {
+                        // 使用 requestAnimationFrame 確保在瀏覽器下一幀繪製前更新 DOM
+                        window.requestAnimationFrame(() => {
                             modalContent.innerHTML = this.render();
                             this.attachEvents();
-                        }, 50);
+                        });
                     }
                 }).catch(error => {
                     console.error('RuleSettings: Error during init and re-render:', error);
