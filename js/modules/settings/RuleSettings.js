@@ -6,6 +6,7 @@ export class RuleSettings {
         console.log('RuleSettings: 1. Constructor called.');
         this.unitId = unitId;
         this.unitSettings = null;
+        this.loadingStarted = false; // 新增旗標，防止重複載入
     }
 
     async init() {
@@ -26,6 +27,31 @@ export class RuleSettings {
     render() {
         console.log('RuleSettings: 5. render() called. unitSettings is null:', this.unitSettings === null);
         if (!this.unitSettings) {
+            // 如果資料未載入，則啟動載入程序，並在完成後強制重新渲染 Modal
+            if (!this.loadingStarted) {
+                this.loadingStarted = true;
+                console.log('RuleSettings: 6. Data not loaded, starting async init().');
+                this.init().then(() => {
+                    // 載入完成後，強制重新渲染 Modal 內容
+                    const modalContent = document.querySelector('#settings-modal .modal-content');
+                    if (modalContent) {
+                        console.log('RuleSettings: 7. Data loaded, forcing modal re-render.');
+                        // 這裡不能直接呼叫 this.render()，因為 this.render() 會返回 HTML 字串，
+                        // 且會再次檢查 this.unitSettings，但這次會成功。
+                        // 為了確保 attachEvents 被呼叫，我們需要將 render() 的結果賦值給 innerHTML
+                        // 並在之後呼叫 attachEvents()。
+                        modalContent.innerHTML = this.render();
+                        this.attachEvents();
+                    }
+                }).catch(error => {
+                    console.error('RuleSettings: Error during init and re-render:', error);
+                    // 顯示錯誤訊息
+                    const modalContent = document.querySelector('#settings-modal .modal-content');
+                    if (modalContent) {
+                        modalContent.innerHTML = `<div class="modal-body text-center py-5 text-danger">載入設定失敗: ${error.message}</div>`;
+                    }
+                });
+            }
             return `<div class="modal-body text-center py-5">載入中...</div>`;
         }
         const rules = this.unitSettings.rules;
