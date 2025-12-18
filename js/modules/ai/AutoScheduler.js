@@ -1,3 +1,4 @@
+// ✅ 修正引用路徑：同層級引用
 import { RuleEngine } from "./RuleEngine.js";
 import { BalanceStrategy, PreferenceStrategy, PatternStrategy } from "./AIStrategies.js";
 
@@ -6,7 +7,7 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode}`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Monthly Limit Check)`);
         const startTime = Date.now();
 
         try {
@@ -14,43 +15,22 @@ export class AutoScheduler {
             if (strategyCode === 'B') StrategyEngine = PreferenceStrategy;
             if (strategyCode === 'C') StrategyEngine = PatternStrategy;
 
-            // 1. 準備 Context
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode);
             context.StrategyEngine = StrategyEngine;
 
-            // 1.1 計算休假配額參數 (Step 1)
             this.calculateLeaveQuotas(context);
-
-            // 1.2 預填固定班與預班 (Step 1)
             this.prefillFixedShifts(context);
 
-            // 2. 逐日排班 (Day 1 -> Day N)
             for (let day = 1; day <= context.daysInMonth; day++) {
-                if (Date.now() - startTime > MAX_RUNTIME) {
-                    context.logs.push("⚠️ 運算超時，提前終止");
-                    break;
-                }
-
-                // Step 2B: 回溯修剪前一天 (Day > 1)
-                // 這是「動態平衡」的核心，排了今天才回頭修昨天
-                if (day > 1) {
-                    this.retroactiveBalance(day - 1, context);
-                }
-
-                // Step 2A: 排今天的班 (允許超編)
+                if (Date.now() - startTime > MAX_RUNTIME) break;
+                if (day > 1) this.retroactiveBalance(day - 1, context);
                 await this.solveDay(day, context);
             }
 
-            // ✅ 修正 2: 月底收尾 (Step 3) - 必須對最後一天執行修剪
-            // 因為迴圈結束時，Day 31 (或 30) 還處於「允許超編」的狀態
-            if (context.daysInMonth > 0) {
-                this.retroactiveBalance(context.daysInMonth, context);
-            }
+            if (context.daysInMonth > 0) this.retroactiveBalance(context.daysInMonth, context);
 
             const duration = (Date.now() - startTime) / 1000;
-            const status = "完成";
-            context.logs.push(`策略 ${strategyCode} ${status} (${duration}s)`);
-
+            context.logs.push(`策略 ${strategyCode} 完成 (${duration}s)`);
             return { assignments: context.assignments, logs: context.logs };
 
         } catch (e) {
@@ -72,6 +52,9 @@ export class AutoScheduler {
         const globalMax = rules.maxConsecutiveWork || 6;
         const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
         const rebalanceLoop = rules.rebalanceLoop || 3;
+        
+        // ✅ 讀取月班種上限 (預設 2)
+        const monthlyLimit = rules.constraints?.monthlyShiftLimit || 2;
         
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
@@ -97,56 +80,39 @@ export class AutoScheduler {
             lastMonthConsecutive[uid] = cons;
             assignments[uid][0] = lastDayShift;
 
-            // 連續上班上限
             let myMaxConsecutive = globalMax;
             if (allowLongLeave && s.isLongLeave) myMaxConsecutive = 7;
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // ✅ 修正 1: 嚴格白名單邏輯 (Strict Whitelist)
-            // 優先權: 懷孕 > 包班(當月) > 包班(靜態) > 一般
+            // 白名單邏輯
             const canFixed = s.constraints?.allowFixedShift; 
             const staticFixed = canFixed ? s.constraints.fixedShiftConfig : null;
-            
             const sub = preScheduleData.submissions?.[uid] || {};
             const pref = sub.preferences || {};
-            const monthlyBatch = pref.batch; // E, N or ""
-            const monthlyMix = pref.monthlyMix;
+            const monthlyBatch = pref.batch; 
 
             let allowed = []; 
-
-            // (A) 母性保護：絕對鎖定
             if (s.constraints?.isPregnant || s.constraints?.isSpecialStatus) {
                 allowed = ['D', 'OFF'];
-            }
-            // (B) 當月選擇包班：絕對鎖定
-            else if (monthlyBatch === 'N') {
+            } else if (monthlyBatch === 'N') {
                 allowed = ['N', 'OFF']; 
-            }
-            else if (monthlyBatch === 'E') {
+            } else if (monthlyBatch === 'E') {
                 allowed = ['E', 'OFF'];
-            }
-            // (C) 靜態設定包班：絕對鎖定 (若當月沒選)
-            else if (!monthlyBatch && staticFixed === 'N') {
+            } else if (!monthlyBatch && staticFixed === 'N') {
                 allowed = ['N', 'OFF'];
-            }
-            else if (!monthlyBatch && staticFixed === 'E') {
+            } else if (!monthlyBatch && staticFixed === 'E') {
                 allowed = ['E', 'OFF'];
-            }
-            // (D) 一般人員：全開，由 AI 權重決定
-            else {
+            } else {
                 allowed = ['D', 'E', 'N', 'OFF'];
             }
             whitelists[uid] = allowed;
             
-            // 填入預班
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     const shiftCode = (w === 'M_OFF' ? 'OFF' : w);
                     assignments[uid][d] = shiftCode;
-                    if (shiftCode === 'OFF') {
-                        preScheduledOffs[uid][d] = true; 
-                    }
+                    if (shiftCode === 'OFF') preScheduledOffs[uid][d] = true;
                 });
             }
 
@@ -170,7 +136,7 @@ export class AutoScheduler {
             lastMonthConsecutive,
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq,
-            rules: { ...rules, rebalanceLoop }, 
+            rules: { ...rules, rebalanceLoop, monthlyLimit }, // 傳入 monthlyLimit
             logs: [],
             startTime: Date.now()
         };
@@ -188,8 +154,6 @@ export class AutoScheduler {
     }
 
     static prefillFixedShifts(context) {
-        // 針對白名單只有 2 個選項 (Working + OFF) 的人進行預填
-        // 這會確保包班者優先佔據名額
         Object.entries(context.whitelists).forEach(([uid, allowed]) => {
             const workingShift = allowed.find(s => s !== 'OFF');
             if (allowed.length === 2 && workingShift) {
@@ -203,32 +167,25 @@ export class AutoScheduler {
         });
     }
 
-    // Step 2A: 排今天的班
     static async solveDay(day, context) {
         if (Date.now() - context.startTime > MAX_RUNTIME) return false;
-        
         const pending = context.staffList.filter(s => !context.assignments[s.uid][day]);
         this.shuffleArray(pending); 
-
-        // 遞迴求解 (允許超編，由後續 2B 平衡)
         await this.solveRecursive(day, pending, 0, context);
         return true;
     }
 
     static async solveRecursive(day, list, idx, context) {
         if (idx >= list.length) return true;
-        
         const staff = list[idx];
         const uid = staff.uid;
         const w = new Date(context.year, context.month - 1, day).getDay();
-        
         const currentCounts = {};
         context.staffList.forEach(s => {
             const sh = context.assignments[s.uid][day];
             if (sh && sh !== 'OFF') currentCounts[sh] = (currentCounts[sh]||0) + 1;
         });
 
-        // 候選排序
         let candidates = context.whitelists[uid].map(shift => ({
             shift,
             score: context.StrategyEngine.calculateScore(uid, shift, day, context, currentCounts, w)
@@ -237,6 +194,11 @@ export class AutoScheduler {
         for (const item of candidates) {
             const shift = item.shift;
             
+            // ✅ 關鍵修正：檢查月班種上限 (若超過則跳過此班別)
+            if (RuleEngine.willViolateMonthlyLimit(context.assignments[uid], shift, day, context.rules.monthlyLimit)) {
+                continue;
+            }
+
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
@@ -250,17 +212,14 @@ export class AutoScheduler {
                 if (await this.solveRecursive(day, list, idx + 1, context)) return true;
             }
 
-            // 回溯
             context.stats[uid][shift]--;
             delete context.assignments[uid][day];
         }
-
-        // 若無解，暫填 OFF
+        
         context.assignments[uid][day] = 'OFF';
         return true;
     }
 
-    // Step 2B: 重平衡 (迴圈機制)
     static retroactiveBalance(day, context) {
         const w = new Date(context.year, context.month - 1, day).getDay();
         const shifts = ['D', 'E', 'N'];
@@ -268,8 +227,6 @@ export class AutoScheduler {
 
         for (let loop = 0; loop < maxLoops; loop++) {
             let changed = false;
-
-            // 1. 統計狀態
             const counts = { D:0, E:0, N:0 };
             const staffByShift = { D:[], E:[], N:[], OFF:[] };
             
@@ -283,7 +240,6 @@ export class AutoScheduler {
                 }
             });
 
-            // 檢查是否所有班別都滿足需求 (是則跳出)
             let allSatisfied = true;
             shifts.forEach(sh => {
                 const req = context.staffReq[sh]?.[w] || 0;
@@ -292,12 +248,11 @@ export class AutoScheduler {
             });
             if (allSatisfied) break;
 
-            // 2. 修剪超編 (Trim Excess) -> Move to OFF
+            // Trim Excess
             shifts.forEach(sh => {
                 const req = context.staffReq[sh]?.[w] || 0;
                 if (counts[sh] > req) {
                     const excess = counts[sh] - req;
-                    // 優先讓「目前休假少 (欠假多)」的人去休假
                     const candidates = staffByShift[sh].sort((a, b) => {
                         const defA = context.targetAvgOff - context.stats[a.uid].OFF;
                         const defB = context.targetAvgOff - context.stats[b.uid].OFF;
@@ -307,12 +262,9 @@ export class AutoScheduler {
                     let trimmed = 0;
                     for (const staff of candidates) {
                         if (trimmed >= excess) break;
-                        
-                        // 檢查預班鎖定 (不可動)
-                        const subWishes = context.preScheduledOffs[staff.uid] || {};
-                        if (subWishes[day]) continue; 
+                        const subWishes = preScheduleData.submissions?.[staff.uid]?.wishes || {};
+                        if (subWishes[day] === sh) continue; 
 
-                        // 包班者不動：白名單只有 [Sh, OFF]
                         const allowed = context.whitelists[staff.uid];
                         if (allowed.length === 2 && allowed.includes(sh)) continue;
 
@@ -327,7 +279,7 @@ export class AutoScheduler {
                 }
             });
 
-            // 3. 填補缺口 (Fill Shortage) -> Move from OFF
+            // Fill Shortage
             shifts.forEach(sh => {
                 const req = context.staffReq[sh]?.[w] || 0;
                 let current = 0;
@@ -335,7 +287,6 @@ export class AutoScheduler {
 
                 if (current < req) {
                     const shortage = req - current;
-                    // 優先找「目前休假多」的人回來上班
                     const candidates = staffByShift.OFF.sort((a, b) => {
                         const defA = context.targetAvgOff - context.stats[a.uid].OFF;
                         const defB = context.targetAvgOff - context.stats[b.uid].OFF;
@@ -346,7 +297,12 @@ export class AutoScheduler {
                     for (const staff of candidates) {
                         if (filled >= shortage) break;
                         if (context.preScheduledOffs[staff.uid]?.[day]) continue; 
-                        if (!context.whitelists[staff.uid].includes(sh)) continue; // 白名單檢查
+                        if (!context.whitelists[staff.uid].includes(sh)) continue; 
+
+                        // ✅ 關鍵修正：補人時也要檢查月班種上限
+                        if (RuleEngine.willViolateMonthlyLimit(context.assignments[staff.uid], sh, day, context.rules.monthlyLimit)) {
+                            continue;
+                        }
 
                         const valid = RuleEngine.validateStaff(
                             { ...context.assignments[staff.uid], [day]: sh }, 
