@@ -17,10 +17,16 @@ export class RuleSettings {
         // 確保 strategyWeights 存在，如果沒有則使用預設 A 方案
         if (!this.unitSettings.strategyWeights) this.unitSettings.strategyWeights = AI_SCORING_CONFIG.STRATEGY_WEIGHTS.A; 
         if (!this.unitSettings.strategyPreset) this.unitSettings.strategyPreset = 'A';
+
+        // 修正：在資料載入完成後，強制重新渲染 Modal 內容
+        const modalContent = document.querySelector('#settings-modal .modal-content');
+        if (modalContent) {
+            modalContent.innerHTML = this.render();
+            this.attachEvents();
+        }
     }
 
     render() {
-        // 修正：增加防禦性檢查，避免在 unitSettings 尚未載入時讀取其屬性
         if (!this.unitSettings) {
             return `<div class="modal-body text-center py-5">載入中...</div>`;
         }
