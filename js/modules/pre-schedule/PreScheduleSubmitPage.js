@@ -219,260 +219,220 @@ export class PreScheduleSubmitPage {
             this.updatePriorityVisibility(currentMix);
         }
 
-        if(disabled) {
-            document.querySelectorAll('#preference-container input, #preference-container select').forEach(el => el.disabled = true);
-        }
+        // ✅ 綁定班別選擇事件
+        document.querySelectorAll('.shift-cell').forEach(cell => {
+            cell.addEventListener('click', (e) => this.toggleDay(e.currentTarget));
+            cell.addEventListener('contextmenu', (e) => this.handleRightClick(e));
+        });
 
-        this.calculateAggregate();
         this.renderCalendar();
         this.updateCounters();
     }
 
-    // ✅ 新增: 控制 Priority 3 顯示
-    updatePriorityVisibility(mixValue) {
-        const p3Container = document.getElementById('container-pref-3');
-        if (p3Container) {
-            if (mixValue === '3') {
-                p3Container.style.display = 'flex'; // 顯示 (flex 因為是 input-group)
+    updatePriorityVisibility(mixType) {
+        const p3 = document.getElementById('priority-3-row');
+        if (p3) {
+            // 只有在選擇 3 種夜班或啟動同意同仁自願選擇 3 種班時才顯示 P3
+            const showMixOption = this.currentSchedule.settings.allowVoluntaryMix3;
+            if (mixType === '3' || showMixOption) {
+                p3.style.display = 'flex';
             } else {
-                p3Container.style.display = 'none';
-                // 清空值
-                const p3Select = document.getElementById('pref-3');
-                if(p3Select) p3Select.value = "";
+                p3.style.display = 'none';
             }
         }
     }
 
-    calculateAggregate() { 
-        this.unitAggregate = {}; this.unitNames = {}; 
-        const subs = this.currentSchedule.submissions || {}; 
-        Object.entries(subs).forEach(([uid, sub]) => { 
-            if (sub.wishes) { 
-                Object.entries(sub.wishes).forEach(([day, type]) => { 
-                    this.unitAggregate[day] = (this.unitAggregate[day] || 0) + 1; 
-                    if (this.currentSchedule.settings.showOtherNames) { 
-                        if (!this.unitNames[day]) this.unitNames[day] = []; 
-                        const name = this.unitStaffMap[uid] || '未知'; 
-                        this.unitNames[day].push(`${name}(${type})`); 
-                    } 
-                }); 
-            } 
-        }); 
-    }
+    renderCalendar() {
+        const calendarBody = document.getElementById('calendar-body');
+        if (!calendarBody) return;
 
-    renderCalendar() { 
-        const grid = document.getElementById('calendar-container'); 
-        grid.innerHTML = ''; 
-        ['日','一','二','三','四','五','六'].forEach(w => grid.innerHTML += `<div class="calendar-header">${w}</div>`); 
-        
-        const { year, month } = this.currentSchedule; 
-        const daysInMonth = new Date(year, month, 0).getDate(); 
-        const firstDay = new Date(year, month - 1, 1).getDay(); 
-        const totalStaff = this.currentSchedule.staffIds.length; 
-        const reserved = this.currentSchedule.settings.reservedStaff || 0; 
-        const reqMatrix = this.currentUnit.staffRequirements || {D:{}, E:{}, N:{}}; 
-        
-        for(let i=0; i<firstDay; i++) grid.innerHTML += `<div class="calendar-cell disabled" style="background:transparent; border:none; min-height:100px;"></div>`; 
-        
-        const unitShifts = this.currentUnit.settings?.shifts || [];
-        const shiftColorMap = {
-            'OFF': { bg:'#dc3545', color:'white' },
-            'M_OFF': { bg:'#212529', color:'white' }
-        };
-        unitShifts.forEach(s => shiftColorMap[s.code] = { bg:s.color, color:'white' });
+        const daysInMonth = new Date(this.year, this.month, 0).getDate();
+        const firstDayOfWeek = new Date(this.year, this.month - 1, 1).getDay(); // 0=Sun, 1=Mon
 
-        for(let d=1; d<=daysInMonth; d++) { 
-            const date = new Date(year, month - 1, d); 
-            const w = date.getDay(); 
-            const isWeekend = (w === 0 || w === 6); 
-            const reqTotal = (reqMatrix.D?.[w]||0) + (reqMatrix.E?.[w]||0) + (reqMatrix.N?.[w]||0); 
-            let dailyLimit = totalStaff - reqTotal - reserved; 
-            if(dailyLimit < 0) dailyLimit = 0; 
-            
-            const count = this.unitAggregate[d] || 0; 
-            const isFull = count >= dailyLimit; 
-            const myType = this.myWishes[d]; 
-            
-            const cell = document.createElement('div'); 
-            let classes = 'calendar-cell'; 
-            if(isWeekend) classes += ' weekend'; 
-            if(myType) classes += ' selected'; 
-            if(isFull) classes += ' over-limit'; 
-            if(this.isReadOnly) classes += ' disabled'; 
-            cell.className = classes; 
-            
-            let tagHtml = ''; 
-            if(myType) { 
-                let style = '';
-                if (myType.startsWith('NO_')) {
-                    const code = myType.replace('NO_', '');
-                    style = `background:#f8f9fa; color:#dc3545; border:1px solid #dc3545;`;
-                    tagHtml = `<span class="shift-badge" style="${style}">勿${code}</span>`;
-                } else {
-                    const cfg = shiftColorMap[myType] || { bg:'#6c757d', color:'white' };
-                    style = `background:${cfg.bg}; color:${cfg.color};`;
-                    tagHtml = `<span class="shift-badge" style="${style}">${myType}</span>`;
-                }
-            } 
-            
-            if (this.currentSchedule.settings.showOtherNames && this.unitNames[d]) { 
-                cell.title = `已預班：${this.unitNames[d].join('、')}`; 
-            } 
-            
-            const bottomInfo = `<div class="bottom-stats ${isFull ? 'full' : ''}"><i class="fas fa-user"></i> ${count}/${dailyLimit}</div>`; 
-            cell.innerHTML = `<div class="day-number ${isWeekend ? 'weekend-text' : ''}">${d}</div> ${tagHtml} ${bottomInfo}`; 
-            
-            if(!this.isReadOnly) { 
-                cell.onclick = () => this.toggleDay(d); 
-                cell.oncontextmenu = (e) => this.handleRightClick(e, d); 
-            } 
-            grid.appendChild(cell); 
-        } 
-    }
+        let html = '';
+        let dayCounter = 1;
 
-    toggleDay(day) { 
-        if (this.myWishes[day]) delete this.myWishes[day]; 
-        else { 
-            if (!this.checkLimits(day)) return; 
-            this.myWishes[day] = 'OFF'; 
-        } 
-        this.renderCalendar(); 
-        this.updateCounters(); 
-    }
-
-    handleRightClick(e, day) { 
-        e.preventDefault(); 
-        this.tempTarget = day; 
-        const menu = document.getElementById('user-shift-menu'); 
-        
-        if(menu) {
-            const unitShifts = this.currentUnit.settings?.shifts || [
-                {code:'D', name:'白班'}, {code:'E', name:'小夜'}, {code:'N', name:'大夜'}
-            ];
-
-            let menuHtml = `<h6 class="dropdown-header bg-light py-1">設定 ${day} 日</h6>`;
-            menuHtml += `<button class="dropdown-item py-1" onclick="window.routerPage.applyShiftFromMenu('OFF')"><span class="badge bg-warning text-dark w-25 me-2">OFF</span> 預休/休假</button>`;
-            menuHtml += `<div class="dropdown-divider my-1"></div>`;
-            
-            unitShifts.forEach(s => {
-                menuHtml += `<button class="dropdown-item py-1" onclick="window.routerPage.applyShiftFromMenu('${s.code}')"><span class="badge text-white w-25 me-2" style="background-color:${s.color}">${s.code}</span> 指定${s.name}</button>`;
-            });
-            menuHtml += `<div class="dropdown-divider my-1"></div>`;
-
-            unitShifts.forEach(s => {
-                menuHtml += `<button class="dropdown-item py-1 text-danger" onclick="window.routerPage.applyShiftFromMenu('NO_${s.code}')"><i class="fas fa-ban w-25 me-2"></i> 勿排${s.name}</button>`;
-            });
-            
-            menuHtml += `<div class="dropdown-divider my-1"></div>`;
-            menuHtml += `<button class="dropdown-item py-1 text-secondary" onclick="window.routerPage.applyShiftFromMenu('')"><i class="fas fa-eraser w-25 me-2"></i> 清除</button>`;
-
-            menu.innerHTML = menuHtml;
-
-            const menuWidth = 180; 
-            let left = e.clientX;
-            let top = e.clientY;
-            
-            if (left + menuWidth > window.innerWidth) left = window.innerWidth - menuWidth - 10;
-            if (top + menu.offsetHeight > window.innerHeight) top = window.innerHeight - menu.offsetHeight - 10;
-
-            menu.style.left = `${left}px`; 
-            menu.style.top = `${top}px`; 
-            menu.style.display = 'block'; 
+        // 填補上個月的空白
+        html += '<tr>';
+        for (let i = 0; i < firstDayOfWeek; i++) {
+            html += '<td class="empty-cell"></td>';
         }
+
+        // 渲染本月
+        for (let i = 0; i < daysInMonth; i++) {
+            const date = dayCounter;
+            const dayOfWeek = (firstDayOfWeek + i) % 7;
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const shiftCode = this.myWishes[date] || 'OFF';
+            const shiftInfo = this.shiftTypes[shiftCode];
+            const isOff = shiftCode === 'OFF';
+            const isHoliday = this.currentSchedule.settings.holidays?.includes(date);
+            const isMOff = shiftCode === 'M_OFF';
+            const isReadOnly = this.isReadOnly;
+
+            // 單位人力需求
+            const demand = this.currentSchedule.demand?.[date] || {};
+            const demandHtml = Object.entries(demand).map(([shift, count]) => {
+                const current = this.unitAggregate[date]?.[shift] || 0;
+                const color = current >= count ? 'text-success' : 'text-danger';
+                return `<span class="${color} small me-1">${shift} ${current}/${count}</span>`;
+            }).join('');
+
+            html += `
+                <td class="shift-cell text-center p-1 ${isWeekend ? 'weekend' : ''} ${isHoliday ? 'holiday' : ''} ${isReadOnly ? 'readonly-cell' : ''}" 
+                    data-date="${date}" 
+                    data-shift="${shiftCode}"
+                    style="background-color: ${shiftInfo.bg}; color: ${shiftInfo.text}; border: ${shiftInfo.border || ''};"
+                    title="${shiftInfo.label}">
+                    <div class="date-label fw-bold">${date}</div>
+                    <div class="shift-label fw-bold">${shiftInfo.label}</div>
+                    <div class="demand-label">${demandHtml}</div>
+                </td>
+            `;
+
+            if (dayOfWeek === 6) {
+                html += '</tr><tr>';
+            }
+            dayCounter++;
+        }
+
+        // 填補下個月的空白
+        const remainingCells = (7 - ((firstDayOfWeek + daysInMonth) % 7)) % 7;
+        for (let i = 0; i < remainingCells; i++) {
+            html += '<td class="empty-cell"></td>';
+        }
+        html += '</tr>';
+
+        calendarBody.innerHTML = html;
     }
 
-    applyShiftFromMenu(type) { 
-        if(!this.tempTarget) return; 
-        const day = this.tempTarget; 
-        
-        if(type) { 
-            if (!this.myWishes[day]) {
-                if (type === 'OFF' && !this.checkLimits(day)) return; 
-            }
-            this.myWishes[day] = type; 
-        } else { 
-            delete this.myWishes[day]; 
-        } 
-        
-        this.renderCalendar(); 
-        this.updateCounters(); 
+    toggleDay(cell) {
+        if (this.isReadOnly) return;
+
+        const date = parseInt(cell.dataset.date);
+        const currentShift = cell.dataset.shift;
+        const shifts = ['OFF', 'D', 'E', 'N', 'NO_D', 'NO_E', 'NO_N'];
+        let nextShiftIndex = (shifts.indexOf(currentShift) + 1) % shifts.length;
+        let nextShiftCode = shifts[nextShiftIndex];
+
+        // 跳過 M_OFF (管理者專用)
+        if (nextShiftCode === 'M_OFF') {
+            nextShiftIndex = (nextShiftIndex + 1) % shifts.length;
+            nextShiftCode = shifts[nextShiftIndex];
+        }
+
+        this.myWishes[date] = nextShiftCode;
+        this.renderCalendar();
+        this.updateCounters();
+    }
+
+    handleRightClick(e) {
+        e.preventDefault();
+        if (this.isReadOnly) return;
+
+        const cell = e.currentTarget;
+        const date = parseInt(cell.dataset.date);
         const menu = document.getElementById('user-shift-menu');
-        if(menu) menu.style.display = 'none'; 
+        const shifts = ['OFF', 'D', 'E', 'N', 'NO_D', 'NO_E', 'NO_N'];
+
+        menu.innerHTML = shifts.map(shift => {
+            const info = this.shiftTypes[shift];
+            return `<button class="dropdown-item" data-shift="${shift}" style="color: ${info.color};">${info.label}</button>`;
+        }).join('');
+
+        menu.style.display = 'block';
+        menu.style.left = `${e.pageX}px`;
+        menu.style.top = `${e.pageY}px`;
+
+        menu.querySelectorAll('.dropdown-item').forEach(item => {
+            item.onclick = () => {
+                this.applyShiftFromMenu(date, item.dataset.shift);
+                menu.style.display = 'none';
+            };
+        });
     }
 
-    checkLimits(day) { 
-        if (this.isAdminMode && !this.isImpersonating) return true; 
-        const settings = this.currentSchedule.settings; 
-        const maxOff = parseInt(settings.maxOffDays); 
-        const maxHoliday = parseInt(settings.maxHoliday || 0); 
-        
-        const currentTotal = Object.values(this.myWishes).filter(v => v === 'OFF').length; 
-        if (currentTotal >= maxOff) { alert("已達預班總數上限"); return false; } 
-        
-        const date = new Date(this.currentSchedule.year, this.currentSchedule.month-1, day); 
-        const w = date.getDay(); 
-        if(w===0 || w===6) { 
-            let hCount = 0; 
-            Object.entries(this.myWishes).forEach(([d, v]) => { 
-                if(v !== 'OFF') return;
-                const dt = new Date(this.currentSchedule.year, this.currentSchedule.month-1, d); 
-                if(dt.getDay()===0 || dt.getDay()===6) hCount++; 
-            }); 
-            if(hCount >= maxHoliday) { alert("已達假日預班上限"); return false; } 
-        } 
-        return true; 
+    applyShiftFromMenu(date, shiftCode) {
+        this.myWishes[date] = shiftCode;
+        this.renderCalendar();
+        this.updateCounters();
     }
 
-    updateCounters() { 
-        const total = Object.values(this.myWishes).filter(v => v === 'OFF').length;
-        let holiday = 0; 
-        Object.entries(this.myWishes).forEach(([d, v]) => { 
-            if(v !== 'OFF') return;
-            const date = new Date(this.currentSchedule.year, this.currentSchedule.month - 1, d); 
-            if(date.getDay() === 0 || date.getDay() === 6) holiday++; 
-        }); 
-        document.getElementById('count-total').textContent = total; 
-        document.getElementById('count-holiday').textContent = holiday; 
+    checkLimits() {
+        const totalOff = Object.values(this.myWishes).filter(s => s === 'OFF').length;
+        const holidayOff = Object.entries(this.myWishes).filter(([date, shift]) => {
+            return shift === 'OFF' && this.currentSchedule.settings.holidays?.includes(parseInt(date));
+        }).length;
+
+        const totalLimit = parseInt(document.getElementById('limit-total').textContent);
+        const holidayLimit = parseInt(document.getElementById('limit-holiday').textContent);
+
+        document.getElementById('current-total').textContent = totalOff;
+        document.getElementById('current-holiday').textContent = holidayOff;
+
+        document.getElementById('current-total').classList.toggle('text-danger', totalOff > totalLimit);
+        document.getElementById('current-holiday').classList.toggle('text-danger', holidayOff > holidayLimit);
+
+        return totalOff <= totalLimit && holidayOff <= holidayLimit;
     }
-    
+
+    updateCounters() {
+        this.checkLimits();
+        this.calculateAggregate();
+    }
+
+    calculateAggregate() {
+        const aggregate = {};
+        const staff = this.currentUnit.staff || [];
+        const allSubmissions = this.currentSchedule.submissions || {};
+
+        staff.forEach(s => {
+            const wishes = allSubmissions[s.uid]?.wishes || {};
+            Object.entries(wishes).forEach(([date, shift]) => {
+                const day = parseInt(date);
+                if (!aggregate[day]) aggregate[day] = {};
+                aggregate[day][shift] = (aggregate[day][shift] || 0) + 1;
+            });
+        });
+
+        // 將自己的預班也加入計算
+        Object.entries(this.myWishes).forEach(([date, shift]) => {
+            const day = parseInt(date);
+            if (!aggregate[day]) aggregate[day] = {};
+            aggregate[day][shift] = (aggregate[day][shift] || 0) + 1;
+        });
+
+        this.unitAggregate = aggregate;
+    }
+
     async handleSubmit() {
-        const canBatch = this.currentUser.constraints?.canBatch;
+        if (this.isReadOnly) return;
+
+        if (!this.checkLimits()) {
+            alert("錯誤：您的休假天數已超過限制，請修正後再提交。");
+            return;
+        }
+
         const preferences = {};
-        
-        const settings = this.currentSchedule.settings;
-        const allow3 = settings.allowThreeTypesVoluntary !== false; 
-        const limit = settings.shiftTypesLimit || 2;
-        
-        let batchPref = ""; // ✅ 修正：將 batchPref 定義在頂部
+        const p1 = document.getElementById('priority-1').value;
+        const p2 = document.getElementById('priority-2').value;
+        const p3 = document.getElementById('priority-3')?.value || '';
+        const showMixOption = this.currentSchedule.settings.allowVoluntaryMix3;
+        const limit = this.currentSchedule.settings.shiftTypesLimit || 2;
 
-        if (canBatch) {
-            batchPref = document.querySelector('input[name="batchPref"]:checked')?.value || "";
-            preferences.batch = batchPref;
-        }
+        const selected = [p1, p2];
+        if (p3) selected.push(p3);
+        const unique = new Set(selected.filter(s => s !== ''));
 
-        // 邏輯修正：僅當顯示混合選項時才讀取，否則預設 2
-        const showMixOption = (limit === 3) || (limit === 2 && allow3);
-        if (showMixOption) {
-            const mixPref = document.querySelector('input[name="monthlyMix"]:checked')?.value || "2";
-            preferences.monthlyMix = mixPref;
-        } else {
-            preferences.monthlyMix = "2"; 
-        }
-
-        const p1 = document.getElementById('pref-1')?.value || "";
-        const p2 = document.getElementById('pref-2')?.value || "";
-        const p3 = document.getElementById('pref-3')?.value || ""; 
-
-        if (!p1 && (p2 || p3)) { alert("請從第一優先開始填寫"); return; }
-        
-        const selected = [p1, p2, p3].filter(x => x);
-        const unique = new Set(selected);
         if (selected.length !== unique.size) { alert("偏好順序請勿選擇重複的班別"); return; }
+
+        const canBatch = this.currentUser.constraints?.canBatch;
+        const batchPref = document.querySelector('input[name="batchPref"]:checked')?.value || "";
 
         // 1. 驗證：包班意願與排班偏好順序的衝突
         if (canBatch && batchPref !== "") {
             const batchShift = batchPref === "包小夜" ? "E" : "N";
-            const conflictingShift = batchShift === "E" ? "N" : "E";
+            const conflictingShift = batchPref === "包小夜" ? "N" : "E";
             
             if (selected.includes(conflictingShift)) {
                 alert(`錯誤：您選擇了 ${batchPref}，但排班偏好順序中包含了 ${conflictingShift} 班。兩者互相矛盾，請修正。`);
