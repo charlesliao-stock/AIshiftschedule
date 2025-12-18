@@ -1,62 +1,39 @@
 // js/ai/AIStrategies.js
 
+// 權重常數定義
 const WEIGHTS = {
+    // 滿足人力需求
     NEED_MET: 0,          
-    NEED_MISSING: 2000,   // 上班優先
-    OVER_STAFFED: -20000, 
+    NEED_MISSING: 2000,   // 缺人 (極高分，絕對優先填補)
+    OVER_STAFFED: -5,     // ✅ 修正：允許超編 (微小扣分)，以便 Step 2A 先填滿格子，後續 Step 2B 再修剪
     
-    PREF_P1: 800,         
-    PREF_P2: 500,        
-    PREF_NO: -9999,       
+    // 員工偏好
+    PREF_P1: 3000,        // 第一志願 (拉高權重，確保 AI 優先考慮)
+    PREF_P2: 1500,        // 第二志願
+    PREF_NO: -9999,       // 勿排 (極大扣分，視為禁區)
     
-    CONTINUITY_BONUS: 50, 
-    PATTERN_PENALTY: -50,
-    TWO_DAY_BLOCK_BONUS: 200,
-
-    // 公平性：每差一天放假的修正力道
-    FAIRNESS_BASE: 1500   
+    // 平衡性 (在 Step 2A 階段先不強力介入，留給 2B 處理)
+    BALANCE_OVER_AVG: -10, 
+    
+    // 連續性 (作息規律)
+    CONTINUITY_BONUS: 200, // 鼓勵延續前一天的班 (減少換班)
+    PATTERN_PENALTY: -50   // 懲罰花花班
 };
 
-// ✅ 改用 O(1) 的讀取方式，不再跑迴圈
-const getCurrentOffDays = (uid, context) => {
-    return context.stats[uid]?.currentOff || 0;
-};
-
-// 公平性分數計算
-const calculateFairnessScore = (uid, day, context) => {
-    const totalIdealOff = context.idealOffDays || 8; 
-    const progress = day / context.daysInMonth;
-    const expectedOffSoFar = totalIdealOff * progress;
-
-    const actualOff = getCurrentOffDays(uid, context);
-
-    const diff = actualOff - expectedOffSoFar;
-    
-    // Day 1-10: x1, Day 11-20: x3, Day 21+: x6
-    let multiplier = 1;
-    if (day > 20) multiplier = 6;
-    else if (day > 10) multiplier = 3;
-    
-    // diff > 0 (假放太多) -> 加分 (上班)
-    // diff < 0 (假放太少) -> 扣分 (不上班)
-    return diff * WEIGHTS.FAIRNESS_BASE * multiplier;
-};
-
+// 策略 A：數值平衡 (Statistical Balance)
 export class BalanceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
+        // 1. 人力需求 (Hard Goal)
         if (shift !== 'OFF') {
             if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
-            else score += WEIGHTS.OVER_STAFFED;
+            else score += WEIGHTS.OVER_STAFFED; // 即使滿了也只扣一點點，允許填入
         }
 
-        if (shift !== 'OFF') {
-            score += calculateFairnessScore(uid, day, context);
-        }
-
+        // 2. 基礎偏好 (Soft Goal)
         const prefs = context.preferences[uid] || {};
         if (prefs.p1 === shift) score += 100;
 
@@ -64,6 +41,7 @@ export class BalanceStrategy {
     }
 }
 
+// 策略 B：願望優先 (Wish Granter)
 export class PreferenceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
@@ -71,45 +49,40 @@ export class PreferenceStrategy {
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
+        // 1. 滿足願望 (絕對優先)
         if (prefs.p1 === shift) score += WEIGHTS.PREF_P1;
         else if (prefs.p2 === shift) score += WEIGHTS.PREF_P2;
 
+        // 2. 人力需求
         if (shift !== 'OFF') {
             if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
             else score += WEIGHTS.OVER_STAFFED;
-        }
-
-        if (shift !== 'OFF') {
-            score += calculateFairnessScore(uid, day, context) * 0.8; 
         }
 
         return score;
     }
 }
 
+// 策略 C：規律作息 (Rhythm Keeper)
 export class PatternStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
-        const prev1 = context.assignments[uid][day-1] || 'OFF';
-        const prev2 = context.assignments[uid][day-2] || 'OFF';
+        const prev = context.assignments[uid][day-1] || 'OFF';
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        if (shift === prev1 && shift !== 'OFF') score += WEIGHTS.CONTINUITY_BONUS;
-        if (shift !== prev1 && prev1 !== 'OFF' && shift !== 'OFF') score += WEIGHTS.PATTERN_PENALTY;
-        
-        if (shift === 'OFF') {
-            const p1Working = prev1 !== 'OFF' && prev1 !== 'M_OFF';
-            if (p1Working && prev1 === prev2) score += WEIGHTS.TWO_DAY_BLOCK_BONUS;
+        // 1. 連續性獎勵
+        if (shift === prev && shift !== 'OFF') {
+            score += WEIGHTS.CONTINUITY_BONUS;
+        }
+        if (shift !== prev && prev !== 'OFF' && shift !== 'OFF') {
+            score += WEIGHTS.PATTERN_PENALTY;
         }
 
+        // 2. 人力需求
         if (shift !== 'OFF') {
             if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
             else score += WEIGHTS.OVER_STAFFED;
-        }
-
-        if (shift !== 'OFF') {
-            score += calculateFairnessScore(uid, day, context);
         }
 
         return score;
