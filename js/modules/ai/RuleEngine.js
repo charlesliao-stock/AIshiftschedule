@@ -14,7 +14,7 @@ export class RuleEngine {
         const isProtected = !!staffConstraints.isPregnant || !!staffConstraints.isPostpartum;
         const minIntervalMins = (rules.constraints?.minInterval11h !== false) ? 660 : 0; 
         
-        // ✅ 新增：月班種上限 (預設 2 種)
+        // 月班種上限 (預設 2 種)
         const monthlyTypeLimit = rules.constraints?.monthlyShiftLimit || 2;
 
         // 建立時間查詢表
@@ -85,11 +85,8 @@ export class RuleEngine {
             prevShift = shift;
         }
 
-        // ✅ F. 檢查月班種數量
-        // 如果這個人這個月排了 D, E, N (3種)，但上限是 2 -> 報錯
-        // 注意：這通常在「嘗試填入」時就要擋掉，這裡是事後驗證
+        // F. 檢查月班種數量 (事後驗證)
         if (usedShifts.size > monthlyTypeLimit) {
-            // 標記在最後一天 (或每一天)
             errors['monthly'] = `班種${usedShifts.size}種 (上限${monthlyTypeLimit})`;
         }
 
@@ -97,7 +94,7 @@ export class RuleEngine {
     }
 
     /**
-     * ✅ 輔助方法：檢查單日填入某班別後，是否會違反月上限
+     * 輔助方法：檢查單日填入某班別後，是否會違反月上限
      * (供 AutoScheduler 在填入前預判)
      */
     static willViolateMonthlyLimit(currentAssignments, newShift, day, monthlyTypeLimit) {
