@@ -1,0 +1,71 @@
+From 05e4a49588dd62119cb1867359479f42c0fb1eaa Mon Sep 17 00:00:00 2001
+From: charlesliao-stock <219194813+charlesliao-stock@users.noreply.github.com>
+Date: Thu, 18 Dec 2025 09:40:37 -0500
+Subject: [PATCH] =?UTF-8?q?Fix:=20=E4=BF=AE=E6=AD=A3=20AI=20=E6=8E=92?=
+ =?UTF-8?q?=E7=8F=AD=E9=82=8F=E8=BC=AF=E9=8C=AF=E8=AA=A4=20(=E5=81=8F?=
+ =?UTF-8?q?=E5=A5=BD=E9=81=B5=E5=AE=88=E8=88=87=E6=AF=8F=E6=97=A5=E6=94=BE?=
+ =?UTF-8?q?=E5=81=87=E4=BA=BA=E6=95=B8=E5=A4=B1=E8=A1=A1)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ js/modules/ai/AIStrategies.js  | 6 ++++--
+ js/modules/ai/AutoScheduler.js | 9 +++++++--
+ 2 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/js/modules/ai/AIStrategies.js b/js/modules/ai/AIStrategies.js
+index bbd2d58..a99eb24 100644
+--- a/js/modules/ai/AIStrategies.js
++++ b/js/modules/ai/AIStrategies.js
+@@ -52,9 +52,11 @@ export class PreferenceStrategy {
+             score += WEIGHTS.PREF_P1;
+         } else if (prefs.p2 === shift) {
+             score += WEIGHTS.PREF_P2;
++        } else if (prefs.p3 === shift) {
++            // P3 視為「勿排」
++            score += WEIGHTS.PREF_NO;
+         } else if (shift !== 'OFF') {
+-            // ✅ 關鍵修正：若此班別既非 P1 也非 P2，且不是 OFF -> 重罰
+-            // 這會讓 AI 寧可排 OFF 也不要排非志願的班
++            // 若此班別既非 P1/P2 也非 P3，且不是 OFF -> 重罰 (非志願班)
+             score += WEIGHTS.NOT_IN_PREF;
+         }
+ 
+diff --git a/js/modules/ai/AutoScheduler.js b/js/modules/ai/AutoScheduler.js
+index 398352f..df5c347 100644
+--- a/js/modules/ai/AutoScheduler.js
++++ b/js/modules/ai/AutoScheduler.js
+@@ -120,7 +120,7 @@ export class AutoScheduler {
+             preferences[uid] = {
+                 p1: pref.priority1,
+                 p2: pref.priority2,
+-                p3: pref.priority3
++                p3: pref.priority3 // 確保 p3 存在，即使為 null/undefined
+             };
+         });
+ 
+@@ -255,6 +255,11 @@ export class AutoScheduler {
+                 const req = context.staffReq[sh]?.[w] || 0;
+                 if (counts[sh] > req) {
+                     const excess = counts[sh] - req;
++                    // 修正: 確保不會將所有超編人員都轉為 OFF，要考慮當日 OFF 的需求
++                    const offReq = context.staffList.length - (context.staffReq.D[w]||0) - (context.staffReq.E[w]||0) - (context.staffReq.N[w]||0);
++                    const currentOff = staffByShift.OFF.length;
++                    const maxToTrim = Math.max(0, offReq - currentOff);
++                    const actualExcess = Math.min(excess, maxToTrim);
+                     const candidates = staffByShift[sh].sort((a, b) => {
+                         const defA = context.targetAvgOff - context.stats[a.uid].OFF;
+                         const defB = context.targetAvgOff - context.stats[b.uid].OFF;
+@@ -263,7 +268,7 @@ export class AutoScheduler {
+ 
+                     let trimmed = 0;
+                     for (const staff of candidates) {
+-                        if (trimmed >= excess) break;
++                        if (trimmed >= actualExcess) break;
+                         
+                         // ✅ 修正：改用 context.preScheduleData
+                         const subWishes = context.preScheduleData.submissions?.[staff.uid]?.wishes || {};
+-- 
+2.34.1
+
