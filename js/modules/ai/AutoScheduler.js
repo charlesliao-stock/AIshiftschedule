@@ -6,7 +6,7 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Monthly Check Enabled)`);
+        console.log(`🚀 AI 排班啟動: 策略 ${strategyCode} (Correct Rules Passing)`);
         const startTime = Date.now();
 
         try {
@@ -47,6 +47,7 @@ export class AutoScheduler {
         const historyAssignments = preScheduleData.assignments || {};
         const preScheduledOffs = {}; 
 
+        // 讀取設定檔
         const rules = unitSettings.settings?.rules || {};
         const strategyWeights = unitSettings.settings?.strategyWeights || {}; 
         
@@ -54,7 +55,7 @@ export class AutoScheduler {
         const allowLongLeave = rules.constraints?.allowLongLeaveException || false;
         const rebalanceLoop = rules.rebalanceLoop || 3;
         
-        // 讀取月班種上限
+        // 確保月班種上限有被讀取
         const monthlyLimit = rules.constraints?.monthlyShiftLimit || 2;
         const staffReq = unitSettings.staffRequirements || { D:[], E:[], N:[] };
 
@@ -84,7 +85,6 @@ export class AutoScheduler {
             if (!s.constraints) s.constraints = {};
             s.constraints.calculatedMaxConsecutive = myMaxConsecutive;
 
-            // 白名單邏輯
             const canFixed = s.constraints?.allowFixedShift; 
             const staticFixed = canFixed ? s.constraints.fixedShiftConfig : null;
             const sub = preScheduleData.submissions?.[uid] || {};
@@ -135,6 +135,7 @@ export class AutoScheduler {
             lastMonthConsecutive,
             shiftDefs: unitSettings.settings?.shifts || [],
             staffReq,
+            // 這裡將完整 rules 傳遞給 context，包含 monthlyShiftLimit
             rules: { ...rules, rebalanceLoop, monthlyLimit }, 
             weights: strategyWeights, 
             logs: [],
@@ -194,7 +195,7 @@ export class AutoScheduler {
         for (const item of candidates) {
             const shift = item.shift;
             
-            // 檢查月班種上限
+            // 檢查月班種上限 (使用 context.rules 中的設定)
             if (RuleEngine.willViolateMonthlyLimit(context.assignments[uid], shift, day, context.rules.monthlyLimit)) {
                 continue;
             }
@@ -202,9 +203,11 @@ export class AutoScheduler {
             context.assignments[uid][day] = shift;
             context.stats[uid][shift] = (context.stats[uid][shift]||0) + 1;
 
+            // ✅ 關鍵修正：傳入 context.rules，而非寫死的物件
+            // 這樣 RuleEngine 才能讀到 monthlyShiftLimit, maxConsecutive 等完整設定
             const valid = RuleEngine.validateStaff(
                 context.assignments[uid], day, context.shiftDefs, 
-                { constraints: { minInterval11h: true } }, 
+                context.rules, // <--- 修正處
                 staff.constraints, context.assignments[uid][0], context.lastMonthConsecutive[uid], day
             );
 
@@ -299,15 +302,15 @@ export class AutoScheduler {
                         if (context.preScheduledOffs[staff.uid]?.[day]) continue; 
                         if (!context.whitelists[staff.uid].includes(sh)) continue; 
 
-                        // 補人時也要檢查月班種
                         if (RuleEngine.willViolateMonthlyLimit(context.assignments[staff.uid], sh, day, context.rules.monthlyLimit)) {
                             continue;
                         }
 
+                        // ✅ 關鍵修正：傳入 context.rules
                         const valid = RuleEngine.validateStaff(
                             { ...context.assignments[staff.uid], [day]: sh }, 
                             day, context.shiftDefs, 
-                            { constraints: { minInterval11h: true } }, 
+                            context.rules, // <--- 修正處
                             staff.constraints, context.assignments[staff.uid][0], context.lastMonthConsecutive[staff.uid], day
                         );
                         if (valid.errors[day]) continue;
