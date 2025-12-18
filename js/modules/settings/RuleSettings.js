@@ -3,7 +3,7 @@ import { AI_SCORING_CONFIG } from "../../config/AI_SCORING_CONFIG.js";
 
 export class RuleSettings {
     constructor(unitId) {
-        console.log('RuleSettings: 1. Constructor called.');
+        console.log('RuleSettings: 1. Constructor called. unitId:', unitId); // 增加 unitId 輸出
         this.unitId = unitId;
         this.unitSettings = null;
         this.loadingStarted = false; // 新增旗標，防止重複載入
@@ -16,6 +16,10 @@ export class RuleSettings {
 
     async loadSettings() {
         console.log('RuleSettings: 3. loadSettings() started.');
+        // 確保 unitId 存在
+        if (!this.unitId) {
+            throw new Error("Unit ID is missing. Cannot load settings.");
+        }
         this.unitSettings = await UnitService.getUnitSettings(this.unitId);
         if (!this.unitSettings.rules) this.unitSettings.rules = {};
         // 確保 strategyWeights 存在，如果沒有則使用預設 A 方案
@@ -35,12 +39,12 @@ export class RuleSettings {
                     // 載入完成後，強制重新渲染 Modal 內容
                     const modalContent = document.querySelector('#settings-modal .modal-content');
                     if (modalContent) {
-                        // 載入完成後，強制重新渲染 Modal 內容
-                        // 使用 requestAnimationFrame 確保在瀏覽器下一幀繪製前更新 DOM
-                        window.requestAnimationFrame(() => {
-                            modalContent.innerHTML = this.render();
-                            this.attachEvents();
-                        });
+                        // 這裡不能直接呼叫 this.render()，因為 this.render() 會返回 HTML 字串，
+                        // 且會再次檢查 this.unitSettings，但這次會成功。
+                        // 為了確保 attachEvents 被呼叫，我們需要將 render() 的結果賦值給 innerHTML
+                        // 並在之後呼叫 attachEvents()。
+                        modalContent.innerHTML = this.render();
+                        this.attachEvents();
                     }
                 }).catch(error => {
                     console.error('RuleSettings: Error during init and re-render:', error);
@@ -57,6 +61,7 @@ export class RuleSettings {
         const weights = this.unitSettings.strategyWeights;
         const scoringCategories = AI_SCORING_CONFIG.SCORING_CATEGORIES;
 
+        // ... (省略 HTML 內容，保持不變)
         const ruleHtml = `
             <div class="card mb-3 border-left-danger">
                 <div class="card-header bg-light fw-bold text-danger">1. 硬性規範 (Hard Constraints)</div>
