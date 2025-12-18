@@ -2,8 +2,11 @@ import { UnitService } from "../../services/firebase/UnitService.js";
 import { userService } from "../../services/firebase/UserService.js";
 import { ScheduleService } from "../../services/firebase/ScheduleService.js";
 import { PreScheduleService } from "../../services/firebase/PreScheduleService.js";
-import { AutoScheduler } from "../modules/ai/AutoScheduler.js"; // 注意路徑
 import { ScoringService } from "../../services/ScoringService.js";
+
+// ✅ 修正引用路徑：從 modules/schedule/ 連到 modules/ai/
+import { RuleEngine } from "../ai/RuleEngine.js";
+import { AutoScheduler } from "../ai/AutoScheduler.js";
 
 export class SchedulePage {
     // ... (constructor 與其他部分保持不變) ...
