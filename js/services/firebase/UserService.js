@@ -65,7 +65,7 @@ export const userService = {
     async getUnitStaff(unitId) { return this.getUsersByUnit(unitId); },
     async getAllStaffCount() { const list = await this.getAllUsers(); return list.length; },
     
-    // ✅ 關鍵修復：搜尋功能
+    // ✅ 關鍵修復：搜尋功能 (全域搜尋)
     async searchUsers(keyword) {
         const list = await this.getAllUsers();
         if (!keyword) return [];
