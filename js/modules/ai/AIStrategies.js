@@ -1,29 +1,40 @@
-const DEFAULT_WEIGHTS = {
-    A_overStaffed: -20,
-    B_p1: 5000,
-    B_p2: 2000,
-    C_continuity: 500,
-    C_pattern: -100,
-    // 共用
-    NEED_MISSING: 2000,
-    PREF_NO: -9999
+// js/modules/ai/AIStrategies.js
+
+const WEIGHTS = {
+    // 滿足人力需求
+    NEED_MET: 0,          
+    NEED_MISSING: 3000,   // 缺人 (高分，但低於 P1，確保在策略 B 中願望優先)
+    OVER_STAFFED: -10,    // 微小扣分，允許超編
+    
+    // 員工偏好
+    PREF_P1: 5000,        // P1 權重極高
+    PREF_P2: 2500,        // P2 權重次之
+    PREF_NO: -9999,       // 勿排 (絕對禁止)
+    NOT_IN_PREF: -5000,   // ✅ 新增：排了「非志願」的班 (針對策略 B)
+    
+    // 平衡性
+    BALANCE_OVER_AVG: -50, 
+    
+    // 連續性
+    CONTINUITY_BONUS: 500, 
+    PATTERN_PENALTY: -200   
 };
 
 export class BalanceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
-        const wConfig = context.weights || DEFAULT_WEIGHTS;
-        
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
+        // 1. 人力需求 (權重較高，追求填滿)
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += (wConfig.NEED_MISSING || 2000);
-            else score += (wConfig.A_overStaffed || -20); // 動態權重
+            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
+            else score += WEIGHTS.OVER_STAFFED;
         }
 
+        // 2. 基礎偏好
         const prefs = context.preferences[uid] || {};
-        if (prefs.p1 === shift) score += 100;
+        if (prefs.p1 === shift) score += 500; // 有加分但不多
 
         return score;
     }
@@ -32,19 +43,25 @@ export class BalanceStrategy {
 export class PreferenceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
-        const wConfig = context.weights || DEFAULT_WEIGHTS;
-        
         const prefs = context.preferences[uid] || {};
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 動態權重
-        if (prefs.p1 === shift) score += (wConfig.B_p1 || 5000);
-        else if (prefs.p2 === shift) score += (wConfig.B_p2 || 2000);
+        // 1. 滿足願望 (絕對優先)
+        if (prefs.p1 === shift) {
+            score += WEIGHTS.PREF_P1;
+        } else if (prefs.p2 === shift) {
+            score += WEIGHTS.PREF_P2;
+        } else if (shift !== 'OFF') {
+            // ✅ 關鍵修正：若此班別既非 P1 也非 P2，且不是 OFF -> 重罰
+            // 這會讓 AI 寧可排 OFF 也不要排非志願的班
+            score += WEIGHTS.NOT_IN_PREF;
+        }
 
+        // 2. 人力需求 (次要)
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += (wConfig.NEED_MISSING || 2000);
-            else score += -5; // 願望優先時，超編懲罰極低
+            if (current < shiftReq) score += 1000; // 降低填補缺口的誘因
+            else score += WEIGHTS.OVER_STAFFED;
         }
 
         return score;
@@ -54,19 +71,18 @@ export class PreferenceStrategy {
 export class PatternStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w) {
         let score = 100;
-        const wConfig = context.weights || DEFAULT_WEIGHTS;
-        
         const prev = context.assignments[uid][day-1] || 'OFF';
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 動態權重
-        if (shift === prev && shift !== 'OFF') score += (wConfig.C_continuity || 500);
-        if (shift !== prev && prev !== 'OFF' && shift !== 'OFF') score += (wConfig.C_pattern || -100);
+        // 1. 連續性 (作息規律優先)
+        if (shift === prev && shift !== 'OFF') score += WEIGHTS.CONTINUITY_BONUS;
+        if (shift !== prev && prev !== 'OFF' && shift !== 'OFF') score += WEIGHTS.PATTERN_PENALTY;
 
+        // 2. 人力需求
         if (shift !== 'OFF') {
-            if (current < shiftReq) score += (wConfig.NEED_MISSING || 2000);
-            else score += -5;
+            if (current < shiftReq) score += WEIGHTS.NEED_MISSING;
+            else score += WEIGHTS.OVER_STAFFED;
         }
 
         return score;
