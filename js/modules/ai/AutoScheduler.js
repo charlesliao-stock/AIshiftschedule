@@ -149,6 +149,9 @@ export class AutoScheduler {
         }
 
         this.fillBlanks(context, day, blankList);
+        
+        // 新增：日班次平衡 (超額轉缺額)
+        this.balanceDailyShifts(context, day);
     }
 
     static checkPreSchedule(context, staff, day) {
@@ -900,3 +903,133 @@ export class AutoScheduler {
         return map;
     }
 }
+
+    // 檢查是否可以交換班次 (續)
+    static canSwap(context, uid1, uid2, day, shift) {
+        const staff2 = context.staffList.find(s => s.uid === uid2);
+        if (!staff2) return false;
+        
+        let whitelist = this.generateWhitelist(context, staff2);
+        
+        const prevShift = this.getShift(context, uid2, day - 1);
+        const nextShift = this.getShift(context, uid2, day + 1);
+        const shiftMap = this.getShiftMap(context.settings);
+        
+        // 1. 檢查 11 小時間隔 (前一天)
+        if (!RuleEngine.checkShiftInterval(prevShift, shift, shiftMap, 660)) {
+            return false;
+        }
+        
+        // 2. 檢查 11 小時間隔 (後一天)
+        if (nextShift && ['D','E','N'].includes(nextShift)) {
+            if (!RuleEngine.checkShiftInterval(shift, nextShift, shiftMap, 660)) {
+                return false;
+            }
+        }
+        
+        // 3. 檢查連續上班天數
+        let consecutive = 0;
+        for (let d = day - 1; d >= 1; d--) {
+            const s = this.getShift(context, uid2, d);
+            if (['D','E','N'].includes(s)) {
+                consecutive++;
+            } else {
+                break;
+            }
+        }
+        
+        const maxCons = staff2.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
+        if (consecutive >= maxCons) {
+            return false;
+        }
+        
+        // 4. 檢查是否在白名單內
+        return whitelist.includes(shift);
+    }
+
+    // =========================================================================
+    // 🔄 新增：日班次平衡 (超額轉缺額)
+    // =========================================================================
+    static balanceDailyShifts(context, day) {
+        const { assignments, staffReq } = context;
+        const dayOfWeek = new Date(context.year, context.month - 1, day).getDay();
+        const shifts = ['D', 'E', 'N'];
+        
+        // 1. 統計當日班次狀態
+        const currentCounts = { D: 0, E: 0, N: 0 };
+        const staffByShift = { D: [], E: [], N: [] };
+        
+        Object.keys(assignments).forEach(uid => {
+            const shift = assignments[uid][day];
+            if (shifts.includes(shift)) {
+                currentCounts[shift]++;
+                staffByShift[shift].push(uid);
+            }
+        });
+        
+        // 2. 識別超額班次 (Overstaffed) 和缺額班次 (Understaffed)
+        const overstaffed = [];
+        const understaffed = [];
+        
+        shifts.forEach(shift => {
+            const req = staffReq[shift]?.[dayOfWeek] || 0;
+            const diff = currentCounts[shift] - req;
+            
+            if (diff > 0) {
+                overstaffed.push({ shift, diff });
+            } else if (diff < 0) {
+                understaffed.push({ shift, diff: -diff });
+            }
+        });
+        
+        if (overstaffed.length === 0 || understaffed.length === 0) return;
+        
+        context.logs.push(`🔄 Day ${day}: 啟動日班次平衡。超額: ${overstaffed.map(o => `${o.shift}(+${o.diff})`).join(', ')}，缺額: ${understaffed.map(u => `${u.shift}(-${u.diff})`).join(', ')}`);
+        
+        let balanceCount = 0;
+        
+        // 3. 嘗試從超額班次轉移到缺額班次
+        for (const over of overstaffed) {
+            for (const under of understaffed) {
+                if (over.diff <= 0 || under.diff <= 0) continue;
+                
+                // 找出超額班次中，可以轉到缺額班次的候選人
+                const candidates = staffByShift[over.shift].filter(uid => {
+                    // 排除被鎖定的人
+                    if (this.isLocked(context, uid, day)) return false;
+                    
+                    // 檢查轉班後是否合法 (將 uid 從 over.shift 轉為 under.shift)
+                    // 由於是同一天轉班，只需檢查 uid 轉為 under.shift 是否合法
+                    return this.canSwap(context, uid, uid, day, under.shift);
+                });
+                
+                // 優先選擇休假天數較少的員工進行轉班 (鼓勵多上班)
+                candidates.sort((a, b) => context.stats[a].OFF - context.stats[b].OFF);
+                
+                const transfers = Math.min(over.diff, under.diff, candidates.length);
+                
+                for (let i = 0; i < transfers; i++) {
+                    const uid = candidates[i];
+                    
+                    // 執行轉班
+                    this.assign(context, uid, day, under.shift);
+                    
+                    // 更新統計
+                    context.stats[uid][over.shift]--;
+                    context.stats[uid][under.shift]++;
+                    
+                    over.diff--;
+                    under.diff--;
+                    balanceCount++;
+                    
+                    context.logs.push(`✅ Day ${day}: ${uid} 從 ${over.shift} 轉為 ${under.shift} (平衡)`);
+                }
+            }
+        }
+        
+        if (balanceCount > 0) {
+            context.logs.push(`✅ Day ${day}: 日班次平衡完成，共轉移 ${balanceCount} 人次`);
+        } else {
+            context.logs.push(`ℹ️ Day ${day}: 日班次平衡未發生轉移`);
+        }
+    }
