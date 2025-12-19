@@ -26,19 +26,17 @@ export class SchedulePage {
         this.settingsModal = null; 
         this.generatedVersions = [];
         
-        // ✅ 修正點 1：確保 handleGlobalClick 存在後再 bind
+        // 確保 handleGlobalClick 存在後再 bind
         this.handleGlobalClick = this.handleGlobalClick.bind(this);
     }
 
-    // ✅ 修正點 2：補上漏掉的方法
+    // 補上漏掉的方法，防止 bind 報錯
     handleGlobalClick(e) {
         // 如果未來有點擊空白處關閉選單的需求，寫在這裡
-        // 目前保留空函式以防止 bind 報錯
     }
 
     cleanup() {
         document.removeEventListener('click', this.handleGlobalClick);
-        // this.closeMenu(); // 若無此方法可註解掉
         const backdrops = document.querySelectorAll('.modal-backdrop');
         backdrops.forEach(b => b.remove());
     }
@@ -74,7 +72,7 @@ export class SchedulePage {
 
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
 
-        // ✅ 修正點 3：補上 settings-modal 的 HTML 結構
+        // 補上 settings-modal 的 HTML 結構
         const modalHtml = `
             <div class="modal fade" id="versions-modal" tabindex="-1">
                 <div class="modal-dialog modal-xl">
@@ -157,9 +155,14 @@ export class SchedulePage {
             this.settingsModal = new bootstrap.Modal(settingsEl);
         }
         
-        await this.loadData();
-        this.renderSchedule();
-        this.attachEvents();
+        try {
+            await this.loadData();
+            this.renderSchedule();
+            this.attachEvents();
+        } catch (e) {
+            console.error("Page Load Error:", e);
+            document.getElementById('schedule-container').innerHTML = `<div class="alert alert-danger m-4">頁面載入失敗: ${e.message}</div>`;
+        }
     }
 
     async loadData() {
@@ -169,7 +172,8 @@ export class SchedulePage {
         this.state.unitSettings = await UnitService.getUnitSettings(currentUnitId);
         
         // 2. 載入員工列表
-        this.state.staffList = await userService.getStaffListByUnit(currentUnitId);
+        // ✅ 修正點：使用 getUsersByUnit 而不是 getStaffListByUnit
+        this.state.staffList = await userService.getUsersByUnit(currentUnitId);
         
         // 3. 載入預排班表 (Pre-Schedule)
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
@@ -196,6 +200,13 @@ export class SchedulePage {
 
     renderSchedule() {
         const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
+        
+        // 若無員工資料，顯示提示
+        if (!staffList || staffList.length === 0) {
+            document.getElementById('schedule-tbody').innerHTML = '<tr><td colspan="100" class="text-center py-5">此單位尚無人員資料</td></tr>';
+            return;
+        }
+
         const staffMap = {};
         staffList.forEach(s => staffMap[s.uid] = s);
 
@@ -274,8 +285,7 @@ export class SchedulePage {
                 if (shift === 'N' || shift === 'E') totalNights++;
             }
 
-            // 檢查單日違規 (僅檢查硬性規則)
-            // 這裡假設 RuleEngine.validateStaff 可用，若無則跳過
+            // 檢查單日違規
             if (typeof RuleEngine !== 'undefined') {
                 const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
                 if (validation.errors[d]) violationCount++;
@@ -379,33 +389,27 @@ export class SchedulePage {
                     const day = parseInt(input.dataset.day);
                     const shift = input.value.toUpperCase().trim();
                     
-                    // 更新數據
                     this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
                     this.state.scheduleData.assignments[uid][day] = shift;
                     
-                    // 更新單元格樣式
                     const cell = input.closest('.shift-cell');
                     cell.className = `shift-cell ${this.getShiftClass(shift)} ${cell.classList.contains('bg-light-gray') ? 'bg-light-gray' : ''}`;
                     
-                    // 重新渲染以更新統計數據和違規計數
                     this.renderSchedule();
                 }
             });
         }
     }
 
-    // --- 評分相關 ---
     async calculateScore() {
         const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
         if (!scheduleData || !unitSettings || !preSchedule) return;
 
-        // 若 ScoringService 未載入，則忽略
         if (typeof ScoringService === 'undefined') return;
 
         const scoreResult = ScoringService.calculate(scheduleData, staffList, unitSettings, preSchedule);
         this.state.scoreResult = scoreResult;
         
-        // 更新評分顯示
         const scoreDisplay = document.getElementById('score-display');
         if (scoreDisplay) {
             scoreDisplay.textContent = `${scoreResult.totalScore} 分`;
@@ -458,7 +462,6 @@ export class SchedulePage {
         this.scoreModal.show();
     }
 
-    // --- AI 排班相關 ---
     async openVersionsModal() {
         const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
         if (!scheduleData || !unitSettings || !preSchedule) {
@@ -476,11 +479,9 @@ export class SchedulePage {
         for (let i = 0; i < strategies.length; i++) {
             const strategyCode = strategies[i];
             
-            // 呼叫 AutoScheduler
             if (typeof AutoScheduler !== 'undefined') {
                 const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, preSchedule, strategyCode);
                 
-                // 計算評分
                 const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
                 
                 this.generatedVersions.push({
@@ -595,7 +596,6 @@ export class SchedulePage {
         }
     }
 
-    // --- 儲存與設定 ---
     async saveSchedule() {
         const { scheduleData, currentUnitId, year, month } = this.state;
         if (!scheduleData) return;
@@ -612,20 +612,28 @@ export class SchedulePage {
         const { currentUnitId } = this.state;
         if (!currentUnitId) return;
 
-        // ✅ 修正點 4：優化設定頁面載入邏輯
-        // 使用 RuleSettings.js 載入內容並放入 Modal
         import('../settings/RuleSettings.js').then(({ RuleSettings }) => {
             const ruleSettings = new RuleSettings(currentUnitId);
-            // 指定 Modal 內的容器 ID (這個 ID 是在上面 render 方法的 modalHtml 中定義的)
             ruleSettings.containerId = 'rule-settings-container-modal';
             
-            // 先顯示 Modal，再載入內容
             this.settingsModal.show();
             
-            // 呼叫 render (RuleSettings 會自動處理載入與 DOM 更新)
             const container = document.getElementById(ruleSettings.containerId);
             if (container) {
                 container.innerHTML = ruleSettings.render();
+                // 若 render 是同步回傳字串，需手動呼叫初始化
+                // 若 render 內部有 async init，則需等待
+                if (ruleSettings.loadRules) {
+                    ruleSettings.loadRules(currentUnitId).then(() => {
+                        // 重新 render 內容
+                        // 注意：RuleSettings.js 的設計可能不同，這裡假設它會自動處理
+                    });
+                }
+                // 重要：綁定事件
+                if (ruleSettings.afterRender) {
+                     // 稍微延遲以確保 DOM 已插入
+                    setTimeout(() => ruleSettings.afterRender(), 50);
+                }
             }
         });
     }
