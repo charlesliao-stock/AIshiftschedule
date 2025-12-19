@@ -183,12 +183,56 @@ export class SchedulePage {
     async loadData() {
         const { currentUnitId, year, month } = this.state;
         
-        this.state.unitSettings = await UnitService.getUnitSettings(currentUnitId);
-        this.state.staffList = await userService.getUsersByUnit(currentUnitId);
+        // 1. 取得完整單位資訊 (包含 unitName 與 settings)
+        // 使用 getUnitByIdWithCache 確保取得最新名稱與設定
+        let unitData = await UnitService.getUnitByIdWithCache(currentUnitId);
         
-        // 載入預班表 (Wishes)
+        // 如果沒有 settings 欄位，嘗試從 UnitService.getUnitSettings 補充 (兼容舊資料)
+        if (!unitData.settings) {
+            const settingsOnly = await UnitService.getUnitSettings(currentUnitId);
+            unitData = { ...unitData, ...settingsOnly };
+        }
+        this.state.unitSettings = unitData;
+
+        // 2. 載入預班表 (Wishes)
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         
+        // 3. 處理人員名單 (重要：必須與預班表同步)
+        let finalStaffList = [];
+        
+        // 先取得該單位目前所有人員作為基礎池
+        const unitUsers = await userService.getUsersByUnit(currentUnitId);
+        const userMap = {};
+        unitUsers.forEach(u => userMap[u.uid] = u);
+
+        // 如果該月已有預班表，則依照預班表的 staffIds 來建立名單
+        // 這能確保「支援人員」或「當時在職人員」正確顯示
+        if (this.state.preSchedule && this.state.preSchedule.staffIds && this.state.preSchedule.staffIds.length > 0) {
+            const promises = this.state.preSchedule.staffIds.map(async (uid) => {
+                // 如果是本單位人員，直接從 userMap 取
+                if (userMap[uid]) return userMap[uid];
+                
+                // 如果 userMap 裡沒有 (例如跨單位支援)，則單獨抓取該 User 資料
+                try {
+                    const guest = await userService.getUserData(uid);
+                    return guest;
+                } catch (e) {
+                    console.warn(`無法讀取人員資料 uid: ${uid}`, e);
+                    return null;
+                }
+            });
+            
+            const results = await Promise.all(promises);
+            finalStaffList = results.filter(u => u !== null);
+            
+        } else {
+            // 如果沒有預班表 (尚未初始化)，則載入目前單位的所有人員
+            finalStaffList = unitUsers;
+        }
+
+        this.state.staffList = finalStaffList;
+
+        // 4. 載入正式班表
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
         
         if (!this.state.scheduleData) {
@@ -199,11 +243,12 @@ export class SchedulePage {
                 version: 0,
                 activeVersion: 0
             };
-            this.performReset(false);
+            this.performReset(false); // 若無正式班表，預設填入預班內容
         }
         
         this.state.daysInMonth = new Date(year, month, 0).getDate();
         
+        // 5. 設定標題 (修正：使用正確讀取到的 unitName)
         const unitName = this.state.unitSettings.unitName || '未命名單位';
         document.getElementById('schedule-title').textContent = `${unitName} ${year}年${month}月`;
     }
@@ -212,21 +257,13 @@ export class SchedulePage {
         const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
         
         if (!staffList || staffList.length === 0) {
-            document.getElementById('schedule-tbody').innerHTML = '<tr><td colspan="100" class="text-center py-5">此單位尚無人員資料</td></tr>';
+            document.getElementById('schedule-tbody').innerHTML = '<tr><td colspan="100" class="text-center py-5">此單位尚無人員資料，或尚未建立預班表。</td></tr>';
             return;
         }
 
-        const staffMap = {};
-        staffList.forEach(s => staffMap[s.uid] = s);
-
-        staffList.sort((a, b) => {
-            const valA = a[this.state.sortKey] || '';
-            const valB = b[this.state.sortKey] || '';
-            if (valA < valB) return this.state.sortAsc ? -1 : 1;
-            if (valA > valB) return this.state.sortAsc ? 1 : -1;
-            return 0;
-        });
-
+        // 注意：這裡不再重新排序 staffList，因為我們希望保持 PreSchedule 定義的順序 (例如依職級)
+        // 除非使用者點擊表頭排序
+        
         const thead = document.getElementById('schedule-thead');
         if(thead) thead.innerHTML = this.renderHeader(daysInMonth);
 
@@ -265,7 +302,7 @@ export class SchedulePage {
         return html;
     }
 
-    // ✅ 新增：產生備註欄位的 HTML
+    // ✅ 產生備註欄位的 HTML
     _renderRemarks(staff, preSchedule) {
         let html = '';
         const constraints = staff.constraints || {};
@@ -309,7 +346,7 @@ export class SchedulePage {
         const uid = staff.uid;
         const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
         
-        // ✅ 修改：呼叫 _renderRemarks 來填入備註欄
+        // ✅ 呼叫 _renderRemarks 來填入備註欄
         const remarksHtml = this._renderRemarks(staff, this.state.preSchedule);
 
         let html = `<tr>
@@ -435,12 +472,20 @@ export class SchedulePage {
                 const target = e.target.closest('th[data-sort]');
                 if (target) {
                     const sortKey = target.dataset.sort;
+                    // 如果點擊排序，這裡只是在當前 staffList 上進行排序，不影響資料來源的同步性
                     if (this.state.sortKey === sortKey) {
                         this.state.sortAsc = !this.state.sortAsc;
                     } else {
                         this.state.sortKey = sortKey;
                         this.state.sortAsc = true;
                     }
+                    this.state.staffList.sort((a, b) => {
+                        const valA = a[this.state.sortKey] || '';
+                        const valB = b[this.state.sortKey] || '';
+                        if (valA < valB) return this.state.sortAsc ? -1 : 1;
+                        if (valA > valB) return this.state.sortAsc ? 1 : -1;
+                        return 0;
+                    });
                     this.renderSchedule();
                 }
             });
@@ -529,6 +574,7 @@ export class SchedulePage {
         
         if (preSchedule && preSchedule.submissions) {
             Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
+                // 只處理目前 staffList 裡面有的人
                 if(sub.wishes && newAssignments[uid]) {
                     Object.entries(sub.wishes).forEach(([d, w]) => { 
                         newAssignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w); 
