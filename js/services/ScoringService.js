@@ -1,4 +1,4 @@
-//import/im//import/import/import { AI_SCORING_CONFIG "../om "../config/AI_SCORINGexport class Scori
+import/im//import/import/import { AI_SCORING_CONFIG "../om "../config/AI_SCORINGexport class Scori
     
     /**
      * 1. 定義評分設定 (4 大類，13 細項)
