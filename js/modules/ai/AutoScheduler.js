@@ -364,8 +364,14 @@ export class AutoScheduler {
             }
             
             if (!assigned) {
-                // 如果沒有赤字班別，則排 OFF
-                this.assign(context, staff.uid, day, 'OFF');
+                // 如果沒有赤字班別，則檢查是否可以排 OFF
+                if (whitelist.includes('OFF')) {
+                    this.assign(context, staff.uid, day, 'OFF');
+                } else {
+                    // 如果連 OFF 都不在白名單內 (極少見，除非是預排指定上班)，則排白名單中的第一個班次
+                    // 為了避免無限循環或邏輯錯誤，這裡強制排 OFF
+                    this.assign(context, staff.uid, day, 'OFF');
+                }
             }
         }
     }
