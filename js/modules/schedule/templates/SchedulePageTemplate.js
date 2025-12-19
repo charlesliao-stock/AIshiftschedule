@@ -102,7 +102,7 @@ export const SchedulePageTemplate = {
 
     // 2. 渲染主表格 Grid
     renderGrid(dataCtx, validationResult, options = {}) {
-        const { year, month, daysInMonth, staffList, unitSettings } = dataCtx;
+        const { year, month, daysInMonth, staffList, unitSettings, preSchedule } = dataCtx;
         const assignments = dataCtx.scheduleData?.assignments || {};
         const { staffReport, coverageErrors } = validationResult;
         const { isInteractive = true, isDropZone = false, versionIdx = null } = options;
@@ -129,6 +129,20 @@ export const SchedulePageTemplate = {
             const staffAssignments = assignments[uid] || {};
             const staffErrors = staffReport[uid]?.errors || {};
             
+            // --- 狀態標籤生成邏輯 (與 SchedulePage.js 一致) ---
+            let statusBadges = '';
+            if (staff.constraints?.isPregnant) statusBadges += '<span class="badge bg-danger ms-1 small">孕</span>';
+            if (staff.constraints?.isPostpartum) statusBadges += '<span class="badge bg-warning text-dark ms-1 small">哺</span>';
+            if (staff.constraints?.canBatch) statusBadges += '<span class="badge bg-info text-dark ms-1 small">包</span>';
+            
+            // --- 預班備註 ---
+            let wishNote = '';
+            if (preSchedule && preSchedule.submissions && preSchedule.submissions[uid]) {
+               if(preSchedule.submissions[uid].notes) {
+                   wishNote = `<div class="text-muted small text-truncate" style="max-width:120px;">📝 ${preSchedule.submissions[uid].notes}</div>`;
+               }
+            }
+
             const deleteBtn = isInteractive 
                 ? `<i class="fas fa-times text-danger ms-2" style="cursor:pointer;" onclick="window.routerPage.deleteStaff('${uid}')"></i>` 
                 : '';
@@ -136,7 +150,11 @@ export const SchedulePageTemplate = {
             bodyHtml += `<tr>
                 <td class="sticky-col bg-white" style="z-index:10;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <div><strong>${staff.name}</strong><br><span class="text-muted small">${staff.rank || ''}</span></div>
+                        <div>
+                            <strong>${staff.name}</strong> ${statusBadges}<br>
+                            <span class="text-muted small">${staff.rank || ''}</span>
+                            ${wishNote}
+                        </div>
                         ${deleteBtn}
                     </div>
                 </td>`;
