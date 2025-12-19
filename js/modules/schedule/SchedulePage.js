@@ -18,7 +18,6 @@ export class SchedulePage {
             scoreResult: null,
             sortKey: 'staffId', 
             sortAsc: true,
-            unitMap: {},
             preSchedule: null // 儲存預班資料
         };
         this.versionsModal = null; 
@@ -172,6 +171,7 @@ export class SchedulePage {
         
         try {
             await this.loadData();
+            // 如果 loadData 判斷需要阻擋(無預班表)，會清空 staffList，renderSchedule 會處理顯示
             this.renderSchedule();
             this.attachEvents();
         } catch (e) {
@@ -184,58 +184,37 @@ export class SchedulePage {
         const { currentUnitId, year, month } = this.state;
         
         // 1. 取得完整單位資訊 (包含 unitName 與 settings)
-        // 使用 getUnitByIdWithCache 確保取得最新名稱與設定
         let unitData = await UnitService.getUnitByIdWithCache(currentUnitId);
-        
-        // 如果沒有 settings 欄位，嘗試從 UnitService.getUnitSettings 補充 (兼容舊資料)
         if (!unitData.settings) {
             const settingsOnly = await UnitService.getUnitSettings(currentUnitId);
             unitData = { ...unitData, ...settingsOnly };
         }
         this.state.unitSettings = unitData;
 
-        // 2. 載入預班表 (Wishes)
+        // 2. 載入預班表 (Wishes) - 這是排班的基礎
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         
-        // 3. 處理人員名單 (重要：必須與預班表同步)
-        let finalStaffList = [];
-        
-        // 先取得該單位目前所有人員作為基礎池
-        const unitUsers = await userService.getUsersByUnit(currentUnitId);
-        const userMap = {};
-        unitUsers.forEach(u => userMap[u.uid] = u);
-
-        // 如果該月已有預班表，則依照預班表的 staffIds 來建立名單
-        // 這能確保「支援人員」或「當時在職人員」正確顯示
-        if (this.state.preSchedule && this.state.preSchedule.staffIds && this.state.preSchedule.staffIds.length > 0) {
-            const promises = this.state.preSchedule.staffIds.map(async (uid) => {
-                // 如果是本單位人員，直接從 userMap 取
-                if (userMap[uid]) return userMap[uid];
-                
-                // 如果 userMap 裡沒有 (例如跨單位支援)，則單獨抓取該 User 資料
-                try {
-                    const guest = await userService.getUserData(uid);
-                    return guest;
-                } catch (e) {
-                    console.warn(`無法讀取人員資料 uid: ${uid}`, e);
-                    return null;
-                }
-            });
-            
-            const results = await Promise.all(promises);
-            finalStaffList = results.filter(u => u !== null);
-            
-        } else {
-            // 如果沒有預班表 (尚未初始化)，則載入目前單位的所有人員
-            finalStaffList = unitUsers;
-        }
-
-        this.state.staffList = finalStaffList;
-
-        // 4. 載入正式班表
+        // 3. 載入正式班表
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
-        
+
+        // ✅ 修正點1 & 2: 嚴格依賴預班表
         if (!this.state.scheduleData) {
+            // 如果沒有正式班表，必須檢查是否有預班表
+            if (!this.state.preSchedule) {
+                // 情境：沒有正式班表，也沒有預班表 -> 禁止進入
+                this.state.staffList = []; // 清空名單以觸發 renderSchedule 的空狀態
+                document.getElementById('schedule-container').innerHTML = `
+                    <div class="alert alert-warning m-5 text-center">
+                        <h4><i class="fas fa-exclamation-triangle"></i> 無法建立排班表</h4>
+                        <p class="mb-4">找不到 ${year}年${month}月 的預班表資料。</p>
+                        <p>排班作業必須基於「預班表」進行。請先至【預班管理】完成預班發布與確認。</p>
+                        <a href="#/pre-schedule/manage" class="btn btn-primary">前往預班管理</a>
+                    </div>`;
+                throw new Error("中止載入：無預班表");
+            }
+
+            // 情境：有預班表，但還沒建立正式班表 -> 初始化
+            console.log("初始化排班表 (基於預班表)...");
             this.state.scheduleData = {
                 unitId: currentUnitId, year, month,
                 assignments: {},
@@ -243,12 +222,37 @@ export class SchedulePage {
                 version: 0,
                 activeVersion: 0
             };
-            this.performReset(false); // 若無正式班表，預設填入預班內容
+            // 立即執行重置，將預班內容填入 assignments
+            this.performReset(false); 
         }
         
         this.state.daysInMonth = new Date(year, month, 0).getDate();
+
+        // 4. 處理人員名單 (必須與預班表同步)
+        let finalStaffList = [];
+        const unitUsers = await userService.getUsersByUnit(currentUnitId);
+        const userMap = {};
+        unitUsers.forEach(u => userMap[u.uid] = u);
+
+        if (this.state.preSchedule && this.state.preSchedule.staffIds) {
+            // 依照預班表的 staffIds 順序載入
+            const promises = this.state.preSchedule.staffIds.map(async (uid) => {
+                if (userMap[uid]) return userMap[uid];
+                try {
+                    return await userService.getUserData(uid);
+                } catch (e) {
+                    return null;
+                }
+            });
+            const results = await Promise.all(promises);
+            finalStaffList = results.filter(u => u !== null);
+        } else {
+            // Fallback (理論上上面的檢查會擋掉這裡，但保留作保險)
+            finalStaffList = unitUsers;
+        }
+
+        this.state.staffList = finalStaffList;
         
-        // 5. 設定標題 (修正：使用正確讀取到的 unitName)
         const unitName = this.state.unitSettings.unitName || '未命名單位';
         document.getElementById('schedule-title').textContent = `${unitName} ${year}年${month}月`;
     }
@@ -257,13 +261,10 @@ export class SchedulePage {
         const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
         
         if (!staffList || staffList.length === 0) {
-            document.getElementById('schedule-tbody').innerHTML = '<tr><td colspan="100" class="text-center py-5">此單位尚無人員資料，或尚未建立預班表。</td></tr>';
+            // 這裡通常不會執行到，因為 loadData 已處理無預班狀況
             return;
         }
 
-        // 注意：這裡不再重新排序 staffList，因為我們希望保持 PreSchedule 定義的順序 (例如依職級)
-        // 除非使用者點擊表頭排序
-        
         const thead = document.getElementById('schedule-thead');
         if(thead) thead.innerHTML = this.renderHeader(daysInMonth);
 
@@ -273,6 +274,7 @@ export class SchedulePage {
                 this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)
             ).join('');
             
+            // ✅ 修正點3 & 4: 渲染統計列 (改為動態班別)
             tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
         }
 
@@ -302,22 +304,17 @@ export class SchedulePage {
         return html;
     }
 
-    // ✅ 產生備註欄位的 HTML
     _renderRemarks(staff, preSchedule) {
         let html = '';
         const constraints = staff.constraints || {};
         const uid = staff.uid;
         
-        // 1. 人員狀態標籤
-        if (constraints.isPregnant) html += '<span class="badge bg-danger me-1" title="懷孕 (禁夜班/長工時)">孕</span>';
-        if (constraints.isPostpartum) html += '<span class="badge bg-warning text-dark me-1" title="產後哺乳">哺</span>';
+        if (constraints.isPregnant) html += '<span class="badge bg-danger me-1" title="懷孕">孕</span>';
+        if (constraints.isPostpartum) html += '<span class="badge bg-warning text-dark me-1" title="哺乳">哺</span>';
         if (constraints.canBatch) html += '<span class="badge bg-info text-dark me-1" title="可包班">包</span>';
 
-        // 2. 預班偏好與備註
         if (preSchedule && preSchedule.submissions && preSchedule.submissions[uid]) {
             const sub = preSchedule.submissions[uid];
-            
-            // 顯示偏好順序 (P1 > P2)
             if (sub.preferences) {
                 const p1 = sub.preferences.priority1 || '-';
                 const p2 = sub.preferences.priority2 || '-';
@@ -325,20 +322,15 @@ export class SchedulePage {
                      html += `<div class="mt-1 small text-primary" style="font-size:0.7rem;"><i class="fas fa-heart"></i> ${p1}>${p2}</div>`;
                 }
             }
-
-            // 顯示文字備註 (截斷顯示，滑鼠移上去看全部)
             if (sub.notes) {
                 html += `<div class="mt-1 text-muted text-truncate fst-italic border-top pt-1" title="${sub.notes}" style="font-size: 0.7rem; max-width: 100%;">
                             ${sub.notes}
                          </div>`;
             }
         }
-        
-        // 3. 管理者備註 (Staff Note)
         if(staff.note) {
              html += `<div class="text-dark small border-top mt-1 pt-1" title="${staff.note}">📝 ${staff.note}</div>`;
         }
-
         return html;
     }
 
@@ -346,7 +338,6 @@ export class SchedulePage {
         const uid = staff.uid;
         const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
         
-        // ✅ 呼叫 _renderRemarks 來填入備註欄
         const remarksHtml = this._renderRemarks(staff, this.state.preSchedule);
 
         let html = `<tr>
@@ -413,44 +404,66 @@ export class SchedulePage {
         return html;
     }
 
+    // ✅ 修正點3 & 4: 動態渲染人力需求統計列 (實際/需求)
     renderStatsRow(daysInMonth, assignments, unitSettings) {
-        const staffReq = unitSettings.staffRequirements || {};
-        const shiftCodes = unitSettings.settings?.shifts?.map(s => s.code) || ['D', 'E', 'N'];
+        const staffReq = unitSettings.staffRequirements || {}; // 這是從設定讀取的需求量 { ShiftCode: { 0:2, 1:3... } }
+        // 從班別設定讀取所有班別，如果沒有則使用預設
+        const availableShifts = unitSettings.settings?.shifts || [
+            {code: 'D', name: '白班'}, {code: 'E', name: '小夜'}, {code: 'N', name: '大夜'}
+        ];
         
-        let html = `<tr class="stats-row">
-            <td class="sticky-col first-col"></td>
-            <td class="sticky-col second-col fw-bold">人力需求</td>
-            <td class="sticky-col third-col"></td>
-        `;
+        let rowsHtml = '';
 
-        for (let d = 1; d <= daysInMonth; d++) {
-            const date = new Date(this.state.year, this.state.month - 1, d);
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            
-            let required = 0;
-            let assigned = 0;
-            
-            shiftCodes.forEach(code => {
-                required += staffReq[code]?.[date.getDay()] || 0;
-            });
+        // 為每一個定義的班別產生一列統計
+        availableShifts.forEach(shiftDef => {
+            const code = shiftDef.code;
+            const name = shiftDef.name;
+            const bgClass = this.getShiftHeaderClass(code); // 取得對應顏色的 class
 
-            Object.keys(assignments).forEach(uid => {
-                const shift = assignments[uid][d];
-                if (shift && shift !== 'OFF' && shift !== 'M_OFF') {
-                    assigned++;
-                }
-            });
+            rowsHtml += `<tr class="stats-row">
+                <td class="sticky-col first-col"></td>
+                <td class="sticky-col second-col fw-bold text-end pe-2">${name}</td>
+                <td class="sticky-col third-col small text-muted">實際/需求</td>
+            `;
 
-            const diff = assigned - required;
-            const diffClass = diff > 0 ? 'text-success' : (diff < 0 ? 'text-danger' : 'text-dark');
+            for (let d = 1; d <= daysInMonth; d++) {
+                const date = new Date(this.state.year, this.state.month - 1, d);
+                const dayOfWeek = date.getDay(); // 0-6
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-            html += `<td class="${isWeekend ? 'bg-light-gray' : ''} text-center small fw-bold ${diffClass}" title="需求: ${required}, 實際: ${assigned}">
-                ${assigned}/${required}
-            </td>`;
-        }
+                // 1. 取得該班別在該星期幾的需求量
+                const required = staffReq[code]?.[dayOfWeek] || 0;
 
-        html += `<td class="sticky-col right-col-4"></td><td class="sticky-col right-col-3"></td><td class="sticky-col right-col-2"></td><td class="sticky-col right-col-1"></td></tr>`;
-        return html;
+                // 2. 計算實際排班人數
+                let assigned = 0;
+                Object.keys(assignments).forEach(uid => {
+                    if (assignments[uid][d] === code) {
+                        assigned++;
+                    }
+                });
+
+                // 3. 判斷顏色 (未達標顯示紅色)
+                let textClass = 'text-success';
+                if (assigned < required) textClass = 'text-danger fw-bold';
+                else if (assigned > required) textClass = 'text-primary';
+
+                rowsHtml += `<td class="${isWeekend ? 'bg-light-gray' : ''} text-center small ${textClass}" 
+                                 title="${name}: 已排${assigned}人 / 需${required}人">
+                    ${assigned}/${required}
+                </td>`;
+            }
+
+            // 補滿右側統計欄位空位
+            rowsHtml += `<td class="sticky-col right-col-4"></td><td class="sticky-col right-col-3"></td><td class="sticky-col right-col-2"></td><td class="sticky-col right-col-1"></td></tr>`;
+        });
+
+        return rowsHtml;
+    }
+    
+    // 輔助：取得班別對應的 Header 樣式 (僅用於美化)
+    getShiftHeaderClass(code) {
+        // 這裡可以根據 code 返回 bg-xxxx
+        return ''; 
     }
 
     getShiftStyle(shift) {
@@ -460,6 +473,7 @@ export class SchedulePage {
         if (shift === 'N') return 'background-color: #212529; color: white;';
         if (shift === 'E') return 'background-color: #ffc107; color: #000;';
         if (shift === 'D') return 'background-color: #d1e7dd; color: #0f5132;';
+        // 對於動態班別，如果有定義顏色，可在這裡擴充讀取 settings.shifts 顏色
         return '';
     }
 
@@ -472,7 +486,6 @@ export class SchedulePage {
                 const target = e.target.closest('th[data-sort]');
                 if (target) {
                     const sortKey = target.dataset.sort;
-                    // 如果點擊排序，這裡只是在當前 staffList 上進行排序，不影響資料來源的同步性
                     if (this.state.sortKey === sortKey) {
                         this.state.sortAsc = !this.state.sortAsc;
                     } else {
@@ -572,6 +585,7 @@ export class SchedulePage {
         
         staffList.forEach(s => { newAssignments[s.uid] = {}; });
         
+        // 確保從 PreSchedule 同步 Wishes
         if (preSchedule && preSchedule.submissions) {
             Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
                 // 只處理目前 staffList 裡面有的人
