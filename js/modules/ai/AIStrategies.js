@@ -27,17 +27,16 @@ export class BalanceStrategy {
 export class PreferenceStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w, weights) {
         let score = 100;
-        const prefs = context.preferences[uid] || {};
+        const pref = context.preferences[uid] || {};
         const shiftReq = context.staffReq[shift]?.[w] || 0;
         const current = currentCounts[shift] || 0;
 
-        // 1. 滿足願望 (絕對優先)
-        // 使用 weights.pref (偏好滿足度權重)
-        if (prefs.p1 === shift) {
-            score += weights.pref * 3; // P1 權重最高
-        } else if (prefs.p2 === shift) {
-            score += weights.pref * 2; // P2 權重次之
-        } else if (prefs.p3 === shift) { 
+        // 1. 志願優先 (使用 weights.pref 權重)
+        if (pref.p1 === shift) {
+            score += weights.pref * 3; // 第一志願高分
+        } else if (pref.p2 === shift) {
+            score += weights.pref * 1.5; // 第二志願中分
+        } else if (pref.p3 === shift) {
             // P3 視為「勿排」 (我們在 AutoScheduler 中已經處理了硬性勿排，這裡作為軟性懲罰)
             score += weights.pref * -1; // 輕微懲罰
         } else if (shift !== 'OFF') {
@@ -46,9 +45,8 @@ export class PreferenceStrategy {
         }
 
         // 2. 預班達成 (使用 weights.wish 權重)
-        // 這裡的 wish 應該是針對員工在日曆上標註的固定班別，但這部分邏輯在 AutoScheduler 的 whitelists 中處理了，
-        // 這裡可以將其視為對排入 OFF 的獎勵/懲罰
-        if (context.wishes[uid]?.[day] === shift) {
+        // 修正: 確保 context.wishes 存在且包含該員工的數據
+        if (context.wishes && context.wishes[uid] && context.wishes[uid][day] === shift) {
             score += weights.wish * 2;
         }
 
@@ -61,6 +59,7 @@ export class PreferenceStrategy {
         return score;
     }
 }
+
 
 export class PatternStrategy {
     static calculateScore(uid, shift, day, context, currentCounts, w, weights) {
