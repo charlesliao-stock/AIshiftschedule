@@ -1,4 +1,6 @@
-import/im//import/import/import { AI_SCORING_CONFIG "../om "../config/AI_SCORINGexport class Scori
+import { AI_SCORING_CONFIG } from "../config/AI_SCORING_CONFIG.js";
+
+export class ScoringService {
     
     /**
      * 1. 定義評分設定 (4 大類，13 細項)
@@ -346,7 +348,8 @@ import/im//import/import/import { AI_SCORING_CONFIG "../om "../config/AI_SCORING
         return metrics;
     }
 
-    // --- 輔助函式 ---\n    static calcStdDev(arr) {
+    // --- 輔助函式 ---
+    static calcStdDev(arr) {
         if (arr.length === 0) return 0;
         const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
         const variance = arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length;
@@ -356,32 +359,11 @@ import/im//import/import/import { AI_SCORING_CONFIG "../om "../config/AI_SCORING
     static getTieredScore(value, tiers) {
         if (!tiers || tiers.length === 0) return { score: 0, label: '未設定' };
         
-        // 這裡要支援兩種邏輯：數值越低越好 vs 數值越高越好
-        // 通常 tiers 是由小到大排序 (limit: 2, 4, 6...)
-        // 對於「百分比」類 (limit: 100, 95...)，通常是越高越好，但我們可以統一由前端 Tiers 定義 limit
-        
-        // 依照排班評分.docx:
-        // 大部分是 "數值越低分越高" (如工時差異: <=2 分數100)
-        // 百分比類是 "數值越高分越高" (如預班達成率: 100% 分數100, >=95 分數80)
-        // 我們的 Tiers 結構是 [{limit: 2, score: 100}, {limit: 4, score: 80}...]
-        
-        // 判斷邏輯：
-        // 如果是 <= 比較 (工時差異)
-        // 如果是 >= 比較 (達成率) -> 此時 Tiers 內的 limit 應設為門檻，且比較邏輯不同
-        
-        // 為了簡化，我們統一由 Tiers 的 limit 定義「區間上限」或「區間下限」
-        // 但因為 JS Array find 是由前至後，我們假設 Tiers 已經依照「最優到最差」排序
-        
-        for (const t of tiers) {
-            // 特殊處理：百分比類 (limit 通常較大且 score 較高)
-            // 文件定義: 100% -> 100分, >=95% -> 80分
-            // 程式邏輯: if (value >= t.limit) return ... (針對百分比)
-            // 程式邏輯: if (value <= t.limit) return ... (針對差異/次數)
-            
-            // 判斷是否為「越高越好」的指標 (通常 limit 會是 100, 95, 90...)
-            // 簡單判斷：如果第一階 limit 為 100 且第二階小於 100，則為 >= 邏輯
-            const isHighBetter = tiers[0].limit === 100 && tiers.length > 1 && tiers[1].limit < 100;
+        // 判斷邏輯：百分比類 (limit 通常是 100, 95...) 通常是越高分越好 (>=)
+        // 差異類 (limit 1, 2, 3...) 通常是越低分越好 (<=)
+        const isHighBetter = tiers[0].limit === 100 && tiers.length > 1 && tiers[1].limit < 100;
 
+        for (const t of tiers) {
             if (isHighBetter) {
                 if (value >= t.limit) return { score: t.score, label: t.label };
             } else {
