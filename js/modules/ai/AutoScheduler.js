@@ -162,11 +162,26 @@ export class AutoScheduler {
             return true;
         }
 
+        // 1. 檢查連續上班天數 (對應規則 1.2)
+        const maxCons = staff.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
+        const currentConsecutive = context.stats[staff.uid].consecutive;
+        const willBeConsecutive = currentConsecutive + 1;
+
+        if (willBeConsecutive > maxCons) {
+            // 如果超過最大連續天數，則強制排 OFF，並忽略預班指定
+            this.assign(context, staff.uid, day, 'OFF');
+            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反連班規則 (${willBeConsecutive}天)，強制 OFF`);
+            return true;
+        }
+
+        // 2. 檢查間隔時間 (對應規則 1.3)
         const prevShift = this.getShift(context, staff.uid, day - 1);
         if (RuleEngine.checkShiftInterval(prevShift, wish, this.getShiftMap(context.settings), 660)) {
             this.assign(context, staff.uid, day, wish);
             return true;
         } else {
+            // 間隔不足 11 小時，忽略預班指定，進入一般排班流程 (返回 false)
+            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反間隔規則 (前: ${prevShift})，進入一般排班`);
             return false; 
         }
     }
@@ -177,35 +192,39 @@ export class AutoScheduler {
         const constraints = staff.constraints || {};
         const prefs = context.preferences[staff.uid] || {};
 
-        // 孕哺限制
+        // 孕哺限制 (規則 2.2)
         if (constraints.isPregnant || constraints.isPostpartum) {
-            list = list.filter(s => s !== 'N');
+            // 假設 E 班結束時間可能超過 22:00，因此移除 E 和 N
+            list = list.filter(s => s !== 'N' && s !== 'E'); 
         }
 
-        // ✅ v2.5 关键改进：确定允许的夜班类型
+        // 根據包班設定過濾 (規則 2.3)
         const p1 = prefs.priority1;
         const p2 = prefs.priority2;
         const p3 = prefs.priority3;
         
-        // 确定员工的夜班类型（E 或 N，不能两者都有）
-        let allowedNightShift = null;
-        if (p1 === 'E' || p2 === 'E' || p3 === 'E') {
-            allowedNightShift = 'E';  // 只能排小夜
-        } else if (p1 === 'N' || p2 === 'N' || p3 === 'N') {
-            allowedNightShift = 'N';  // 只能排大夜
-        }
-        
-        // 排除另一种夜班
-        if (allowedNightShift === 'E') {
-            list = list.filter(s => s !== 'N');  // 排除大夜
-            console.log(`  ${staff.name} (${staff.uid}): 偏好小夜，排除大夜 N`);
-        } else if (allowedNightShift === 'N') {
-            list = list.filter(s => s !== 'E');  // 排除小夜
-            console.log(`  ${staff.name} (${staff.uid}): 偏好大夜，排除小夜 E`);
-        }
+        // 檢查是否有包班設定 (E 或 N)
+        let isEOnly = (p1 === 'E' || p2 === 'E' || p3 === 'E') && !(p1 === 'N' || p2 === 'N' || p3 === 'N');
+        let isNOnly = (p1 === 'N' || p2 === 'N' || p3 === 'N') && !(p1 === 'E' || p2 === 'E' || p3 === 'E');
 
-        // 偏好过滤
-        if (p1 || p2) {
+        if (isEOnly) {
+            // 包小夜 (E)
+            list = list.filter(s => s === 'E' || s === 'OFF');
+            context.logs.push(`  ${staff.name} (${staff.uid}): 依偏好設定為包小夜，白名單: E, OFF`);
+        } else if (isNOnly) {
+            // 包大夜 (N)
+            list = list.filter(s => s === 'N' || s === 'OFF');
+            context.logs.push(`  ${staff.name} (${staff.uid}): 依偏好設定為包大夜，白名單: N, OFF`);
+        } else if ((p1 === 'D' || p2 === 'D' || p3 === 'D') && (p1 === 'E' || p2 === 'E' || p3 === 'E')) {
+            // 白班 + 小夜 (D, E) (規則 2.4)
+            list = list.filter(s => s === 'D' || s === 'E' || s === 'OFF');
+            context.logs.push(`  ${staff.name} (${staff.uid}): 依偏好設定為 D+E，白名單: D, E, OFF`);
+        } else if ((p1 === 'D' || p2 === 'D' || p3 === 'D') && (p1 === 'N' || p2 === 'N' || p3 === 'N')) {
+            // 白班 + 大夜 (D, N) (規則 2.4)
+            list = list.filter(s => s === 'D' || s === 'N' || s === 'OFF');
+            context.logs.push(`  ${staff.name} (${staff.uid}): 依偏好設定為 D+N，白名單: D, N, OFF`);
+        } else {
+            // 原始邏輯：檢查平衡度並調整白名單 (規則 2.4 的平衡度檢查)
             const preferred = ['OFF'];
             
             // 强偏好（priority1）始终保留
@@ -224,18 +243,12 @@ export class AutoScheduler {
             const daysPassed = Object.keys(context.assignments[staff.uid]).length;
             const expectedOff = Math.floor((avgTarget / context.daysInMonth) * daysPassed);
             
-            // ✅ v2.5 调整：更严格地遵守偏好
+            // 檢查平衡度
             if (currentOff < expectedOff - 6) {
                 // 非常严重落后（6天以上）：完全开放
                 list = ['D', 'E', 'N', 'OFF'];
                 if (constraints.isPregnant || constraints.isPostpartum) {
-                    list = list.filter(s => s !== 'N');
-                }
-                // 重新应用夜班类型限制
-                if (allowedNightShift === 'E') {
-                    list = list.filter(s => s !== 'N');
-                } else if (allowedNightShift === 'N') {
-                    list = list.filter(s => s !== 'E');
+                    list = list.filter(s => s !== 'N' && s !== 'E');
                 }
             } else if (currentOff < expectedOff - 4) {
                 // 严重落后（4-6天）：保留强偏好，开放白班
@@ -263,16 +276,26 @@ export class AutoScheduler {
         
         const maxCons = staff.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
 
-        if (currentConsecutive >= maxCons) {
-            return ['OFF']; 
-        }
-
         return whitelist.filter(shift => {
             if (shift === 'OFF') return true;
 
+            // 1. 檢查間隔時間 (規則 3.1)
             if (!RuleEngine.checkShiftInterval(prevShift, shift, shiftMap, 660)) {
                 return false;
             }
+
+            // 2. 檢查連續上班 (規則 3.2)
+            const willBeConsecutive = currentConsecutive + 1;
+            
+            if (willBeConsecutive > maxCons + 1) {
+                // 超過 maxCons + 1 (即超過 7 天)，強制移除
+                return false;
+            } else if (willBeConsecutive === maxCons + 1) {
+                // 剛好是 maxCons + 1 (即第 7 天)，檢查是否允許連 7
+                const allowMaxCons = staff.constraints?.allowMaxConsecutive || context.rules.allowMaxConsecutive || false;
+                return allowMaxCons;
+            }
+            
             return true;
         });
     }
@@ -305,20 +328,38 @@ export class AutoScheduler {
 
         for (const item of blankList) {
             const { staff, whitelist } = item;
+            const prefs = context.preferences[staff.uid] || {};
+            const p1 = prefs.priority1;
+            const p2 = prefs.priority2;
             
-            const deficits = ['D', 'E', 'N'].map(shift => ({
-                shift, 
-                deficit: (staffReq[shift]?.[dayOfWeek] || 0) - currentCounts[shift]
-            }));
-            deficits.sort((a, b) => b.deficit - a.deficit);
-
             let assigned = 'OFF'; 
             
-            for (const d of deficits) {
-                if (d.deficit > 0 && whitelist.includes(d.shift)) {
-                    assigned = d.shift;
-                    break;
+            // 1. 檢查包班設定 (規則 2A-2.2)
+            let isEOnly = (p1 === 'E' || p2 === 'E') && !(p1 === 'N' || p2 === 'N');
+            let isNOnly = (p1 === 'N' || p2 === 'N') && !(p1 === 'E' || p2 === 'E');
+
+            if (isEOnly && whitelist.includes('E')) {
+                assigned = 'E';
+            } else if (isNOnly && whitelist.includes('N')) {
+                assigned = 'N';
+            } else {
+                // 2. 如果不是包班人員 (規則 2A-2.3)
+                
+                // 2.1 優先選擇「目前人數最少的班別」且在白名單中
+                const deficits = ['D', 'E', 'N'].map(shift => ({
+                    shift, 
+                    deficit: (staffReq[shift]?.[dayOfWeek] || 0) - currentCounts[shift]
+                }));
+                deficits.sort((a, b) => b.deficit - a.deficit); // 需求赤字最大的優先
+
+                for (const d of deficits) {
+                    if (whitelist.includes(d.shift)) {
+                        assigned = d.shift;
+                        break;
+                    }
                 }
+                
+                // 2.2 如果所有上班班別都被移除，則保持 OFF (assigned 預設為 'OFF')
             }
             
             this.assign(context, staff.uid, day, assigned);
@@ -358,24 +399,60 @@ export class AutoScheduler {
             let { shift, count } = item;
             let candidates = staffByShift[shift].map(uid => context.staffList.find(s => s.uid === uid));
             
-            candidates = candidates.filter(s => !this.isLocked(context, s.uid, targetDay));
+            // 篩選出可以轉為 OFF 的人員 (規則 2B.2)
+            candidates = candidates.filter(s => {
+                // 排除預班鎖定的人
+                const wishes = context.wishes[s.uid]?.wishes || {};
+                if (wishes[targetDay] === shift) return false;
+                
+                // 排除固定包班的人 (簡單判斷)
+                const prefs = context.preferences[s.uid] || {};
+                const p1 = prefs.priority1;
+                const p2 = prefs.priority2;
+                if ((p1 === shift || p2 === shift) && (p1 !== 'OFF' && p2 !== 'OFF')) return false; 
+                
+                // 排除被鎖定的人
+                if (this.isLocked(context, s.uid, targetDay)) return false;
 
-            candidates.sort((a, b) => stats[a.uid].OFF - stats[b.uid].OFF);
+                return true;
+            });
 
-            const maxOff = dailyLeaveQuotas[targetDay] || 0;
-            let currentOffCount = Object.values(assignments).filter(sch => sch[targetDay] === 'OFF' || sch[targetDay] === 'M_OFF').length;
-
-            const toRemove = [];
+            // 根據休假差額排序 (規則 2B.3)
+            candidates.sort((a, b) => {
+                // 休假差額 = 平均放假天數 - (已排OFF數)
+                const diffA = context.avgLeaveTarget - stats[a.uid].OFF;
+                const diffB = context.avgLeaveTarget - stats[b.uid].OFF;
+                
+                // 差額越大（休假越少）→ 優先度越高
+                return diffB - diffA;
+            });
+            
+            // 排除「上1休1」模式 (規則 2B.3)
+            const finalCandidates = [];
             for (const staff of candidates) {
-                if (count <= 0) break;
-                if (currentOffCount >= maxOff) break;
+                const d2Shift = this.getShift(context, staff.uid, targetDay - 1); // Day X-2 (前天)
+                const d3Shift = this.getShift(context, staff.uid, targetDay - 2); // Day X-3
 
-                const d2Shift = this.getShift(context, staff.uid, targetDay - 1);
-                const d3Shift = this.getShift(context, staff.uid, targetDay - 2);
+                // 檢查是否為 OFF - 上班 - 上班 (即 OFF - X - Y)
                 const isWork2 = ['D','E','N'].includes(d2Shift);
                 const isOff3 = d3Shift === 'OFF';
 
-                if (isWork2 && isOff3) continue; 
+                if (isWork2 && isOff3) {
+                    // 如果符合 OFF - 上班 - 上班 模式，則跳過，避免上1休1
+                    context.logs.push(`❌ Day ${targetDay}: ${staff.uid} 排除上1休1模式 (OFF-${d2Shift}-${shift})`);
+                    continue; 
+                }
+                finalCandidates.push(staff);
+            }
+            
+            // 檢查休假配額 (規則 2B.4)
+            const maxOff = dailyLeaveQuotas[targetDay] || 0;
+            let currentOffCount = Object.values(assignments).filter(sch => sch[targetDay] === 'OFF' || sch[targetDay] === 'M_OFF').length;
+            
+            const toRemove = [];
+            for (const staff of finalCandidates) {
+                if (count <= 0) break; // 已經滿足超編人數
+                if (currentOffCount >= maxOff) break; // 已經達到休假配額
 
                 toRemove.push(staff.uid);
                 count--;
@@ -384,7 +461,14 @@ export class AutoScheduler {
 
             toRemove.forEach(uid => {
                 this.assign(context, uid, targetDay, 'OFF');
+                context.logs.push(`✅ Day ${targetDay}: ${uid} (${shift}) 標記為 OFF (回溯)`);
             });
+            
+            // 記錄未被標記的人 (規則 2B.4 - 記錄下次優先給予休假)
+            const notMarked = finalCandidates.slice(toRemove.length);
+            if (notMarked.length > 0) {
+                context.logs.push(`ℹ️ Day ${targetDay}: ${notMarked.length} 人因配額不足未標記 OFF，下次優先考慮`);
+            }
         }
     }
 
