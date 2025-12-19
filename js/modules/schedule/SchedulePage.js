@@ -81,13 +81,13 @@ export class SchedulePage {
 
         const modalHtml = `
             <div class="modal fade" id="versions-modal" tabindex="-1">
-                <div class="modal-dialog modal-xl">
+                <div class="modal-dialog modal-fullscreen">
                     <div class="modal-content">
                         <div class="modal-header bg-primary text-white">
-                            <h5 class="modal-title"><i class="fas fa-robot me-2"></i>AI 智慧排班結果選擇</h5>
+                            <h5 class="modal-title"><i class="fas fa-robot me-2"></i>AI 智慧排班結果</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body" id="versions-modal-body"></div>
+                        <div class="modal-body bg-light p-3" id="versions-modal-body"></div>
                     </div>
                 </div>
             </div>
@@ -183,7 +183,7 @@ export class SchedulePage {
     async loadData() {
         const { currentUnitId, year, month } = this.state;
         
-        // 1. 取得完整單位資訊 (包含 unitName 與 settings)
+        // 1. 取得完整單位資訊
         let unitData = await UnitService.getUnitByIdWithCache(currentUnitId);
         if (!unitData.settings) {
             const settingsOnly = await UnitService.getUnitSettings(currentUnitId);
@@ -191,18 +191,16 @@ export class SchedulePage {
         }
         this.state.unitSettings = unitData;
 
-        // 2. 載入預班表 (Wishes) - 這是排班的基礎
+        // 2. 載入預班表 (Wishes)
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         
         // 3. 載入正式班表
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
 
-        // ✅ 修正點1 & 2: 嚴格依賴預班表
+        // 嚴格依賴預班表
         if (!this.state.scheduleData) {
-            // 如果沒有正式班表，必須檢查是否有預班表
             if (!this.state.preSchedule) {
-                // 情境：沒有正式班表，也沒有預班表 -> 禁止進入
-                this.state.staffList = []; // 清空名單以觸發 renderSchedule 的空狀態
+                this.state.staffList = []; 
                 document.getElementById('schedule-container').innerHTML = `
                     <div class="alert alert-warning m-5 text-center">
                         <h4><i class="fas fa-exclamation-triangle"></i> 無法建立排班表</h4>
@@ -213,7 +211,6 @@ export class SchedulePage {
                 throw new Error("中止載入：無預班表");
             }
 
-            // 情境：有預班表，但還沒建立正式班表 -> 初始化
             console.log("初始化排班表 (基於預班表)...");
             this.state.scheduleData = {
                 unitId: currentUnitId, year, month,
@@ -222,20 +219,18 @@ export class SchedulePage {
                 version: 0,
                 activeVersion: 0
             };
-            // 立即執行重置，將預班內容填入 assignments
             this.performReset(false); 
         }
         
         this.state.daysInMonth = new Date(year, month, 0).getDate();
 
-        // 4. 處理人員名單 (必須與預班表同步)
+        // 4. 處理人員名單 (與預班表同步)
         let finalStaffList = [];
         const unitUsers = await userService.getUsersByUnit(currentUnitId);
         const userMap = {};
         unitUsers.forEach(u => userMap[u.uid] = u);
 
         if (this.state.preSchedule && this.state.preSchedule.staffIds) {
-            // 依照預班表的 staffIds 順序載入
             const promises = this.state.preSchedule.staffIds.map(async (uid) => {
                 if (userMap[uid]) return userMap[uid];
                 try {
@@ -247,7 +242,6 @@ export class SchedulePage {
             const results = await Promise.all(promises);
             finalStaffList = results.filter(u => u !== null);
         } else {
-            // Fallback (理論上上面的檢查會擋掉這裡，但保留作保險)
             finalStaffList = unitUsers;
         }
 
@@ -261,7 +255,6 @@ export class SchedulePage {
         const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
         
         if (!staffList || staffList.length === 0) {
-            // 這裡通常不會執行到，因為 loadData 已處理無預班狀況
             return;
         }
 
@@ -274,7 +267,6 @@ export class SchedulePage {
                 this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)
             ).join('');
             
-            // ✅ 修正點3 & 4: 渲染統計列 (改為動態班別)
             tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
         }
 
@@ -404,21 +396,17 @@ export class SchedulePage {
         return html;
     }
 
-    // ✅ 修正點3 & 4: 動態渲染人力需求統計列 (實際/需求)
     renderStatsRow(daysInMonth, assignments, unitSettings) {
-        const staffReq = unitSettings.staffRequirements || {}; // 這是從設定讀取的需求量 { ShiftCode: { 0:2, 1:3... } }
-        // 從班別設定讀取所有班別，如果沒有則使用預設
+        const staffReq = unitSettings.staffRequirements || {}; 
         const availableShifts = unitSettings.settings?.shifts || [
             {code: 'D', name: '白班'}, {code: 'E', name: '小夜'}, {code: 'N', name: '大夜'}
         ];
         
         let rowsHtml = '';
 
-        // 為每一個定義的班別產生一列統計
         availableShifts.forEach(shiftDef => {
             const code = shiftDef.code;
             const name = shiftDef.name;
-            const bgClass = this.getShiftHeaderClass(code); // 取得對應顏色的 class
 
             rowsHtml += `<tr class="stats-row">
                 <td class="sticky-col first-col"></td>
@@ -428,13 +416,11 @@ export class SchedulePage {
 
             for (let d = 1; d <= daysInMonth; d++) {
                 const date = new Date(this.state.year, this.state.month - 1, d);
-                const dayOfWeek = date.getDay(); // 0-6
+                const dayOfWeek = date.getDay(); 
                 const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-                // 1. 取得該班別在該星期幾的需求量
                 const required = staffReq[code]?.[dayOfWeek] || 0;
 
-                // 2. 計算實際排班人數
                 let assigned = 0;
                 Object.keys(assignments).forEach(uid => {
                     if (assignments[uid][d] === code) {
@@ -442,7 +428,6 @@ export class SchedulePage {
                     }
                 });
 
-                // 3. 判斷顏色 (未達標顯示紅色)
                 let textClass = 'text-success';
                 if (assigned < required) textClass = 'text-danger fw-bold';
                 else if (assigned > required) textClass = 'text-primary';
@@ -453,19 +438,12 @@ export class SchedulePage {
                 </td>`;
             }
 
-            // 補滿右側統計欄位空位
             rowsHtml += `<td class="sticky-col right-col-4"></td><td class="sticky-col right-col-3"></td><td class="sticky-col right-col-2"></td><td class="sticky-col right-col-1"></td></tr>`;
         });
 
         return rowsHtml;
     }
     
-    // 輔助：取得班別對應的 Header 樣式 (僅用於美化)
-    getShiftHeaderClass(code) {
-        // 這裡可以根據 code 返回 bg-xxxx
-        return ''; 
-    }
-
     getShiftStyle(shift) {
         if (!shift) return '';
         if (shift === 'OFF') return 'background-color: #f0f0f0; color: #999;';
@@ -473,7 +451,6 @@ export class SchedulePage {
         if (shift === 'N') return 'background-color: #212529; color: white;';
         if (shift === 'E') return 'background-color: #ffc107; color: #000;';
         if (shift === 'D') return 'background-color: #d1e7dd; color: #0f5132;';
-        // 對於動態班別，如果有定義顏色，可在這裡擴充讀取 settings.shifts 顏色
         return '';
     }
 
@@ -585,10 +562,8 @@ export class SchedulePage {
         
         staffList.forEach(s => { newAssignments[s.uid] = {}; });
         
-        // 確保從 PreSchedule 同步 Wishes
         if (preSchedule && preSchedule.submissions) {
             Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
-                // 只處理目前 staffList 裡面有的人
                 if(sub.wishes && newAssignments[uid]) {
                     Object.entries(sub.wishes).forEach(([d, w]) => { 
                         newAssignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w); 
@@ -700,7 +675,8 @@ export class SchedulePage {
     renderVersionTable(assignments, scoreResult) {
         const { staffList, daysInMonth, unitSettings } = this.state;
         
-        let html = `<div class="schedule-table-wrapper" style="max-height: 50vh;">
+        // ✅ 修改點 2: 表格高度最大化 (calc 100vh - 220px 預留給 Header 和 Tabs)
+        let html = `<div class="schedule-table-wrapper" style="height: calc(100vh - 220px); overflow: auto;">
             <table class="table table-bordered schedule-grid mb-0">
                 <thead id="version-thead">
                     ${this.renderHeader(daysInMonth)}
