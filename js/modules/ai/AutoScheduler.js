@@ -23,6 +23,7 @@ export class AutoScheduler {
 
                 if (day > 1) {
                     this.step2B_RetroactiveOFF(context, day - 1);
+                    this.step2C_RetroactiveDeficit(context, day - 1); // 新增：回溯性填補赤字
                 }
 
                 this.step2A_ScheduleToday(context, day);
@@ -985,6 +986,105 @@ export class AutoScheduler {
             context.logs.push(`✅ Day ${day}: 日班次平衡完成，共轉移 ${balanceCount} 人次`);
         } else {
             context.logs.push(`ℹ️ Day ${day}: 日班次平衡未發生轉移`);
+        }
+    }
+}
+
+    // =========================================================================
+    // 🔄 新增：Step 2C: 回溯性填補赤字
+    // =========================================================================
+    static step2C_RetroactiveDeficit(context, targetDay) {
+        const { staffList, assignments, staffReq } = context;
+        const dayOfWeek = new Date(context.year, context.month - 1, targetDay).getDay();
+        const shifts = ['D', 'E', 'N'];
+        
+        // 1. 識別赤字班次
+        const deficitShifts = [];
+        let totalDeficit = 0;
+        
+        shifts.forEach(shift => {
+            const req = staffReq[shift]?.[dayOfWeek] || 0;
+            let currentCount = 0;
+            Object.keys(assignments).forEach(uid => {
+                if (assignments[uid][targetDay] === shift) {
+                    currentCount++;
+                }
+            });
+            
+            const deficit = req - currentCount;
+            if (deficit > 0) {
+                deficitShifts.push({ shift, deficit });
+                totalDeficit += deficit;
+            }
+        });
+        
+        if (totalDeficit === 0) return;
+        
+        context.logs.push(`🔄 Day ${targetDay}: 啟動回溯性填補赤字。赤字: ${deficitShifts.map(d => `${d.shift}(-${d.deficit})`).join(', ')}`);
+        
+        // 2. 篩選候選人：前一天被排 OFF 且非預排 OFF 的員工
+        let candidates = staffList.filter(staff => {
+            const uid = staff.uid;
+            const shift = assignments[uid][targetDay];
+            
+            // 必須是 OFF
+            if (shift !== 'OFF') return false;
+            
+            // 必須是非預排 OFF (即非鎖定)
+            if (this.isLocked(context, uid, targetDay)) return false;
+            
+            return true;
+        });
+        
+        // 優先選擇休假天數較少的員工進行填補
+        candidates.sort((a, b) => context.stats[a.uid].OFF - context.stats[b.uid].OFF);
+        
+        let fillCount = 0;
+        
+        // 3. 嘗試將 OFF 轉為赤字班次
+        for (const staff of candidates) {
+            if (totalDeficit <= 0) break;
+            
+            const uid = staff.uid;
+            let assigned = false;
+            
+            // 優先選擇赤字最大的班次
+            deficitShifts.sort((a, b) => b.deficit - a.deficit);
+            
+            for (const deficit of deficitShifts) {
+                if (deficit.deficit <= 0) continue;
+                
+                const targetShift = deficit.shift;
+                
+                // 檢查轉班後是否合法 (將 uid 的 OFF 轉為 targetShift)
+                // 由於是 OFF 轉為上班班次，只需檢查 targetShift 是否在白名單內，以及是否違反前後班次間隔
+                
+                // 1. 檢查白名單
+                let whitelist = this.generateWhitelist(context, staff);
+                if (!whitelist.includes(targetShift)) continue;
+                
+                // 2. 檢查硬性規則 (使用 canSwap 檢查)
+                // canSwap 檢查的是 uid2 換成 shift，這裡 uid1=uid2=uid，shift=targetShift
+                if (this.canSwap(context, uid, uid, targetDay, targetShift)) {
+                    // 執行轉班
+                    this.assign(context, uid, targetDay, targetShift);
+                    
+                    // 更新統計
+                    deficit.deficit--;
+                    totalDeficit--;
+                    fillCount++;
+                    assigned = true;
+                    
+                    context.logs.push(`✅ Day ${targetDay}: ${staff.name} (OFF) 回溯填補為 ${targetShift} (赤字)`);
+                    break;
+                }
+            }
+        }
+        
+        if (fillCount > 0) {
+            context.logs.push(`✅ Day ${targetDay}: 回溯性填補赤字完成，共填補 ${fillCount} 人次`);
+        } else {
+            context.logs.push(`ℹ️ Day ${targetDay}: 回溯性填補赤字未發生填補`);
         }
     }
 }
