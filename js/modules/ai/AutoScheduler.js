@@ -48,6 +48,7 @@ export class AutoScheduler {
         const assignments = currentSchedule.assignments ? JSON.parse(JSON.stringify(currentSchedule.assignments)) : {};
         const preferences = {};
         const whitelists = {};
+        const wishes = {}; // 新增: wishes 用於 PreferenceStrategy
         const stats = {}; 
         const lastMonthConsecutive = {}; 
         const historyAssignments = preScheduleData.assignments || {};
@@ -114,10 +115,12 @@ export class AutoScheduler {
             whitelists[uid] = allowed;
             
             // 修正: 僅將 wishes 寫入尚未排班的日期
+            wishes[uid] = {}; // 初始化 wishes[uid]
             if (sub.wishes) {
                 Object.entries(sub.wishes).forEach(([d, w]) => {
                     const day = String(d);
                     const shiftCode = (w === 'M_OFF' ? 'OFF' : w);
+                    wishes[uid][day] = shiftCode; // 儲存願望班別到 wishes
                     // 僅在當天尚未排班時，才寫入願望班別
                     if (!assignments[uid][day]) {
                         assignments[uid][day] = shiftCode;
@@ -127,9 +130,9 @@ export class AutoScheduler {
             }
 
             preferences[uid] = {
-                p1: pref.priority1,
-                p2: pref.priority2,
-                p3: pref.priority3 
+                p1: pref.priority1 || null,
+                p2: pref.priority2 || null,
+                p3: pref.priority3 || null
             };
         });
 
@@ -141,6 +144,7 @@ export class AutoScheduler {
             assignments,
             preferences,
             whitelists,
+            wishes, // 新增: 將 wishes 加入 context
             stats,
             preScheduledOffs,
             lastMonthConsecutive,
@@ -306,29 +310,27 @@ export class AutoScheduler {
                 const req = context.staffReq[sh]?.[w] || 0;
                 if (counts[sh] > req) {
                     const excess = counts[sh] - req;
-                    const candidates = staffByShift[sh].filter(s => !context.preScheduledOffs[s.uid][day]);
-                    this.shuffleArray(candidates);
-                    
-                    for (let i = 0; i < excess && i < candidates.length; i++) {
-                        const s = candidates[i];
-                        const oldShift = context.assignments[s.uid][day];
-                        
-                        // 檢查是否能轉為 OFF
-                        context.assignments[s.uid][day] = 'OFF';
-                        const valid = RuleEngine.validateStaff(
-                            context.assignments[s.uid], day, context.shiftDefs, 
-                            context.rules, 
-                            s.constraints, context.assignments[s.uid][0], context.lastMonthConsecutive[s.uid], day
-                        );
-                        
-                        if (!valid.errors[day]) {
-                            context.stats[s.uid][oldShift]--;
-                            context.stats[s.uid].OFF = (context.stats[s.uid].OFF || 0) + 1;
-                            counts[oldShift]--;
-                            changed = true;
-                        } else {
-                            // 轉為 OFF 失敗，恢復原班別
-                            context.assignments[s.uid][day] = oldShift;
+                    const maxOff = context.staffList.length - (context.staffReq.D[w]||0) - (context.staffReq.E[w]||0) - (context.staffReq.N[w]||0);
+                    const currentOff = staffByShift.OFF.length;
+                    const maxToTrim = Math.max(0, maxOff - currentOff);
+                    const actualExcess = Math.min(excess, maxToTrim);
+
+                    if (actualExcess > 0) {
+                        const candidates = staffByShift[sh].sort((a, b) => {
+                            const defA = context.targetAvgOff - context.stats[a.uid].OFF;
+                            const defB = context.targetAvgOff - context.stats[b.uid].OFF;
+                            return defA - defB; // 優先將 OFF 數最少的員工轉為 OFF
+                        });
+
+                        for (let i = 0; i < actualExcess; i++) {
+                            const staff = candidates[i];
+                            if (staff) {
+                                context.assignments[staff.uid][day] = 'OFF';
+                                context.stats[staff.uid][sh]--;
+                                context.stats[staff.uid].OFF++;
+                                staffByShift.OFF.push(staff);
+                                changed = true;
+                            }
                         }
                     }
                 }
@@ -339,28 +341,21 @@ export class AutoScheduler {
                 const req = context.staffReq[sh]?.[w] || 0;
                 if (counts[sh] < req) {
                     const deficit = req - counts[sh];
-                    const candidates = staffByShift.OFF.filter(s => !context.preScheduledOffs[s.uid][day] && context.whitelists[s.uid].includes(sh));
-                    this.shuffleArray(candidates);
+                    const candidates = staffByShift.OFF.filter(s => context.whitelists[s.uid].includes(sh))
+                        .sort((a, b) => {
+                            const defA = context.stats[a.uid].OFF - context.targetAvgOff;
+                            const defB = context.stats[b.uid].OFF - context.targetAvgOff;
+                            return defB - defA; // 優先將 OFF 數最多的員工轉為工作班
+                        });
 
-                    for (let i = 0; i < deficit && i < candidates.length; i++) {
-                        const s = candidates[i];
-                        
-                        // 檢查是否能轉為 sh
-                        context.assignments[s.uid][day] = sh;
-                        const valid = RuleEngine.validateStaff(
-                            context.assignments[s.uid], day, context.shiftDefs, 
-                            context.rules, 
-                            s.constraints, context.assignments[s.uid][0], context.lastMonthConsecutive[s.uid], day
-                        );
-
-                        if (!valid.errors[day]) {
-                            context.stats[s.uid].OFF--;
-                            context.stats[s.uid][sh] = (context.stats[s.uid][sh] || 0) + 1;
-                            counts[sh]++;
+                    for (let i = 0; i < deficit; i++) {
+                        const staff = candidates[i];
+                        if (staff) {
+                            context.assignments[staff.uid][day] = sh;
+                            context.stats[staff.uid].OFF--;
+                            context.stats[staff.uid][sh]++;
+                            staffByShift.OFF = staffByShift.OFF.filter(s => s.uid !== staff.uid);
                             changed = true;
-                        } else {
-                            // 轉為 sh 失敗，恢復 OFF
-                            context.assignments[s.uid][day] = 'OFF';
                         }
                     }
                 }
