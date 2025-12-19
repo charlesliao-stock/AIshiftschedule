@@ -49,7 +49,7 @@ export class SchedulePage {
                 .sticky-col { position: sticky; z-index: 10; background-color: #fff; }
                 .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; text-align: center; }
                 .second-col { left: 60px; z-index: 11; width: 80px; text-align: center; }
-                .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 100px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+                .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 120px; max-width: 150px; overflow: hidden; white-space: normal; font-size: 0.75rem; vertical-align: middle; line-height: 1.2; }
                 
                 /* 右側統計固定欄 */
                 .right-col-1 { right: 0; z-index: 11; border-left: 2px solid #ccc !important; width: 45px; background-color: #fff; } 
@@ -246,7 +246,7 @@ export class SchedulePage {
         let html = `<tr>
             <th class="sticky-col first-col cursor-pointer" data-sort="staffId">ID <i class="fas fa-sort sort-icon"></i></th>
             <th class="sticky-col second-col cursor-pointer" data-sort="name">姓名 <i class="fas fa-sort sort-icon"></i></th>
-            <th class="sticky-col third-col">備註</th>
+            <th class="sticky-col third-col">備註 (狀態/偏好)</th>
         `;
         for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(this.state.year, this.state.month - 1, d);
@@ -265,14 +265,62 @@ export class SchedulePage {
         return html;
     }
 
+    // ✅ 新增：產生備註欄位的 HTML
+    _renderRemarks(staff, preSchedule) {
+        let html = '';
+        const constraints = staff.constraints || {};
+        const uid = staff.uid;
+        
+        // 1. 人員狀態標籤
+        if (constraints.isPregnant) html += '<span class="badge bg-danger me-1" title="懷孕 (禁夜班/長工時)">孕</span>';
+        if (constraints.isPostpartum) html += '<span class="badge bg-warning text-dark me-1" title="產後哺乳">哺</span>';
+        if (constraints.canBatch) html += '<span class="badge bg-info text-dark me-1" title="可包班">包</span>';
+
+        // 2. 預班偏好與備註
+        if (preSchedule && preSchedule.submissions && preSchedule.submissions[uid]) {
+            const sub = preSchedule.submissions[uid];
+            
+            // 顯示偏好順序 (P1 > P2)
+            if (sub.preferences) {
+                const p1 = sub.preferences.priority1 || '-';
+                const p2 = sub.preferences.priority2 || '-';
+                if(p1 !== '-' || p2 !== '-') {
+                     html += `<div class="mt-1 small text-primary" style="font-size:0.7rem;"><i class="fas fa-heart"></i> ${p1}>${p2}</div>`;
+                }
+            }
+
+            // 顯示文字備註 (截斷顯示，滑鼠移上去看全部)
+            if (sub.notes) {
+                html += `<div class="mt-1 text-muted text-truncate fst-italic border-top pt-1" title="${sub.notes}" style="font-size: 0.7rem; max-width: 100%;">
+                            ${sub.notes}
+                         </div>`;
+            }
+        }
+        
+        // 3. 管理者備註 (Staff Note)
+        if(staff.note) {
+             html += `<div class="text-dark small border-top mt-1 pt-1" title="${staff.note}">📝 ${staff.note}</div>`;
+        }
+
+        return html;
+    }
+
     renderStaffRow(staff, assignments, daysInMonth, unitSettings) {
         const uid = staff.uid;
         const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
+        
+        // ✅ 修改：呼叫 _renderRemarks 來填入備註欄
+        const remarksHtml = this._renderRemarks(staff, this.state.preSchedule);
 
         let html = `<tr>
             <td class="sticky-col first-col">${staff.staffId || ''}</td>
-            <td class="sticky-col second-col">${staff.name}</td>
-            <td class="sticky-col third-col small text-truncate" title="${staff.note || ''}">${staff.note || ''}</td>
+            <td class="sticky-col second-col">
+                <div class="fw-bold">${staff.name}</div>
+                <div class="small text-muted" style="font-size:0.7rem;">${staff.title||''}</div>
+            </td>
+            <td class="sticky-col third-col text-start px-2 py-1">
+                ${remarksHtml}
+            </td>
         `;
         
         let totalHours = 0;
@@ -511,7 +559,6 @@ export class SchedulePage {
         this.generatedVersions = [];
         const strategies = ['A', 'B', 'C']; 
 
-        // ✅ 修正：建構符合 AutoScheduler 預期的 Context 物件
         let prevY = this.state.year;
         let prevM = this.state.month - 1;
         if (prevM === 0) { prevM = 12; prevY--; }
@@ -519,9 +566,7 @@ export class SchedulePage {
         const aiContext = {
             year: prevY,
             month: prevM,
-            // 放入上個月的班表，讓 AI 判斷接續性
             assignments: scheduleData.prevAssignments || {},
-            // 放入這個月的預班/願望
             submissions: preSchedule?.submissions || {} 
         };
 
