@@ -166,7 +166,8 @@ export class ScoringService {
             
             let hours = 0, off = 0;
             let cons = 0;
-            let prev = assignments[uid][0] || 'OFF'; 
+            // 修正: 確保 assignments[uid] 存在且包含 [0] 屬性
+            let prev = (assignments[uid] && assignments[uid][0]) ? assignments[uid][0] : 'OFF';
 
             for (let d = 1; d <= daysInMonth; d++) {
                 const shift = row[d] || 'OFF';
