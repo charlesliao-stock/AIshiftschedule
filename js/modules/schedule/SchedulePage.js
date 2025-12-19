@@ -25,12 +25,20 @@ export class SchedulePage {
         this.scoreModal = null;
         this.settingsModal = null; 
         this.generatedVersions = [];
+        
+        // ✅ 修正點 1：確保 handleGlobalClick 存在後再 bind
         this.handleGlobalClick = this.handleGlobalClick.bind(this);
+    }
+
+    // ✅ 修正點 2：補上漏掉的方法
+    handleGlobalClick(e) {
+        // 如果未來有點擊空白處關閉選單的需求，寫在這裡
+        // 目前保留空函式以防止 bind 報錯
     }
 
     cleanup() {
         document.removeEventListener('click', this.handleGlobalClick);
-        this.closeMenu();
+        // this.closeMenu(); // 若無此方法可註解掉
         const backdrops = document.querySelectorAll('.modal-backdrop');
         backdrops.forEach(b => b.remove());
     }
@@ -66,6 +74,7 @@ export class SchedulePage {
 
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
 
+        // ✅ 修正點 3：補上 settings-modal 的 HTML 結構
         const modalHtml = `
             <div class="modal fade" id="versions-modal" tabindex="-1">
                 <div class="modal-dialog modal-xl">
@@ -75,8 +84,7 @@ export class SchedulePage {
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body" id="versions-modal-body">
-                            <!-- AI 排班結果將在這裡渲染 -->
-                        </div>
+                            </div>
                     </div>
                 </div>
             </div>
@@ -88,8 +96,18 @@ export class SchedulePage {
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body" id="score-modal-body">
-                            <!-- 評分細節將在這裡渲染 -->
+                            </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal fade" id="settings-modal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">規則與評分設定</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
+                        <div id="rule-settings-container-modal"></div>
                     </div>
                 </div>
             </div>
@@ -132,7 +150,12 @@ export class SchedulePage {
         window.routerPage = this; 
         this.versionsModal = new bootstrap.Modal(document.getElementById('versions-modal'));
         this.scoreModal = new bootstrap.Modal(document.getElementById('score-modal'));
-        this.settingsModal = new bootstrap.Modal(document.getElementById('settings-modal'));
+        
+        // 確保 settings-modal 存在後再初始化
+        const settingsEl = document.getElementById('settings-modal');
+        if (settingsEl) {
+            this.settingsModal = new bootstrap.Modal(settingsEl);
+        }
         
         await this.loadData();
         this.renderSchedule();
@@ -167,7 +190,8 @@ export class SchedulePage {
         this.state.daysInMonth = new Date(year, month, 0).getDate();
         
         // 6. 更新標題
-        document.getElementById('schedule-title').textContent = `${this.state.unitSettings.unitName} ${year}年${month}月`;
+        const unitName = this.state.unitSettings.unitName || '未命名單位';
+        document.getElementById('schedule-title').textContent = `${unitName} ${year}年${month}月`;
     }
 
     renderSchedule() {
@@ -186,14 +210,15 @@ export class SchedulePage {
 
         // 渲染表頭
         const thead = document.getElementById('schedule-thead');
-        thead.innerHTML = this.renderHeader(daysInMonth);
+        if(thead) thead.innerHTML = this.renderHeader(daysInMonth);
 
         // 渲染表身
         const tbody = document.getElementById('schedule-tbody');
-        tbody.innerHTML = staffList.map(staff => this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)).join('');
-
-        // 渲染統計行
-        tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
+        if(tbody) {
+            tbody.innerHTML = staffList.map(staff => this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)).join('');
+            // 渲染統計行
+            tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
+        }
 
         // 重新計算評分
         this.calculateScore();
@@ -243,15 +268,18 @@ export class SchedulePage {
             if (shift === 'OFF' || shift === 'M_OFF') {
                 totalOff++;
             } else if (shift) {
-                const shiftDef = unitSettings.settings?.shifts.find(s => s.code === shift);
+                const shiftDef = unitSettings.settings?.shifts?.find(s => s.code === shift);
                 const hours = parseFloat(shiftDef?.hours || 0);
                 totalHours += hours;
                 if (shift === 'N' || shift === 'E') totalNights++;
             }
 
             // 檢查單日違規 (僅檢查硬性規則)
-            const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
-            if (validation.errors[d]) violationCount++;
+            // 這裡假設 RuleEngine.validateStaff 可用，若無則跳過
+            if (typeof RuleEngine !== 'undefined') {
+                const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
+                if (validation.errors[d]) violationCount++;
+            }
 
             html += `<td class="shift-cell ${shiftClass} ${isWeekend ? 'bg-light-gray' : ''}" data-uid="${uid}" data-day="${d}">
                 <input type="text" class="form-control form-control-sm text-center shift-input" value="${shift}" maxlength="3" data-uid="${uid}" data-day="${d}">
@@ -268,7 +296,7 @@ export class SchedulePage {
 
     renderStatsRow(daysInMonth, assignments, unitSettings) {
         const staffReq = unitSettings.staffRequirements || {};
-        const shiftCodes = unitSettings.settings?.shifts.map(s => s.code) || ['D', 'E', 'N'];
+        const shiftCodes = unitSettings.settings?.shifts?.map(s => s.code) || ['D', 'E', 'N'];
         
         let html = `<tr class="stats-row">
             <td class="sticky-col first-col"></td>
@@ -325,49 +353,54 @@ export class SchedulePage {
     attachEvents() {
         document.addEventListener('click', this.handleGlobalClick);
         
-        // 排序事件
-        document.getElementById('schedule-thead').addEventListener('click', (e) => {
-            const target = e.target.closest('th[data-sort]');
-            if (target) {
-                const sortKey = target.dataset.sort;
-                if (this.state.sortKey === sortKey) {
-                    this.state.sortAsc = !this.state.sortAsc;
-                } else {
-                    this.state.sortKey = sortKey;
-                    this.state.sortAsc = true;
+        const thead = document.getElementById('schedule-thead');
+        if (thead) {
+            thead.addEventListener('click', (e) => {
+                const target = e.target.closest('th[data-sort]');
+                if (target) {
+                    const sortKey = target.dataset.sort;
+                    if (this.state.sortKey === sortKey) {
+                        this.state.sortAsc = !this.state.sortAsc;
+                    } else {
+                        this.state.sortKey = sortKey;
+                        this.state.sortAsc = true;
+                    }
+                    this.renderSchedule();
                 }
-                this.renderSchedule();
-            }
-        });
+            });
+        }
 
-        // 班別輸入事件
-        document.getElementById('schedule-tbody').addEventListener('change', (e) => {
-            const input = e.target.closest('.shift-input');
-            if (input) {
-                const uid = input.dataset.uid;
-                const day = parseInt(input.dataset.day);
-                const shift = input.value.toUpperCase().trim();
-                
-                // 更新數據
-                this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
-                this.state.scheduleData.assignments[uid][day] = shift;
-                
-                // 更新單元格樣式
-                const cell = input.closest('.shift-cell');
-                cell.className = `shift-cell ${this.getShiftClass(shift)} ${cell.classList.contains('bg-light-gray') ? 'bg-light-gray' : ''}`;
-                
-                // 重新渲染以更新統計數據和違規計數
-                this.renderSchedule();
-            }
-        });
-        
-        // AI 排班按鈕事件 (在 openVersionsModal 中處理)
+        const tbody = document.getElementById('schedule-tbody');
+        if (tbody) {
+            tbody.addEventListener('change', (e) => {
+                const input = e.target.closest('.shift-input');
+                if (input) {
+                    const uid = input.dataset.uid;
+                    const day = parseInt(input.dataset.day);
+                    const shift = input.value.toUpperCase().trim();
+                    
+                    // 更新數據
+                    this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
+                    this.state.scheduleData.assignments[uid][day] = shift;
+                    
+                    // 更新單元格樣式
+                    const cell = input.closest('.shift-cell');
+                    cell.className = `shift-cell ${this.getShiftClass(shift)} ${cell.classList.contains('bg-light-gray') ? 'bg-light-gray' : ''}`;
+                    
+                    // 重新渲染以更新統計數據和違規計數
+                    this.renderSchedule();
+                }
+            });
+        }
     }
 
     // --- 評分相關 ---
     async calculateScore() {
         const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
         if (!scheduleData || !unitSettings || !preSchedule) return;
+
+        // 若 ScoringService 未載入，則忽略
+        if (typeof ScoringService === 'undefined') return;
 
         const scoreResult = ScoringService.calculate(scheduleData, staffList, unitSettings, preSchedule);
         this.state.scoreResult = scoreResult;
@@ -438,21 +471,25 @@ export class SchedulePage {
         this.versionsModal.show();
 
         this.generatedVersions = [];
-        const strategies = ['A', 'B', 'C']; // 策略 A, B, C
+        const strategies = ['A', 'B', 'C']; 
 
         for (let i = 0; i < strategies.length; i++) {
             const strategyCode = strategies[i];
-            const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, preSchedule, strategyCode);
             
-            // 計算評分
-            const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
-            
-            this.generatedVersions.push({
-                strategyCode,
-                assignments: result.assignments,
-                scoreResult,
-                logs: result.logs
-            });
+            // 呼叫 AutoScheduler
+            if (typeof AutoScheduler !== 'undefined') {
+                const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, preSchedule, strategyCode);
+                
+                // 計算評分
+                const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
+                
+                this.generatedVersions.push({
+                    strategyCode,
+                    assignments: result.assignments,
+                    scoreResult,
+                    logs: result.logs
+                });
+            }
         }
 
         this.renderVersions();
@@ -461,6 +498,11 @@ export class SchedulePage {
     renderVersions() {
         const modalBody = document.getElementById('versions-modal-body');
         
+        if (this.generatedVersions.length === 0) {
+            modalBody.innerHTML = `<div class="text-center p-5 text-danger">AI 排班生成失敗，請檢查 AutoScheduler。</div>`;
+            return;
+        }
+
         let navHtml = `<ul class="nav nav-tabs" id="versionTabs" role="tablist">`;
         let contentHtml = `<div class="tab-content" id="versionTabContent">`;
 
@@ -485,7 +527,7 @@ export class SchedulePage {
 
             contentHtml += `
                 <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="version-${index}" role="tabpanel">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3 pt-3">
                         <h5 class="fw-bold text-primary">${score} 分</h5>
                         <span class="badge bg-secondary">${strategyName}</span>
                         <button class="btn btn-primary btn-sm" onclick="window.routerPage.applyVersion(${index})">套用此版本</button>
@@ -545,7 +587,7 @@ export class SchedulePage {
         const version = this.generatedVersions[index];
         if (version) {
             this.state.scheduleData.assignments = version.assignments;
-            this.state.scheduleData.version = this.state.scheduleData.version + 1;
+            this.state.scheduleData.version = (this.state.scheduleData.version || 0) + 1;
             this.state.scheduleData.activeVersion = this.state.scheduleData.version;
             this.versionsModal.hide();
             this.renderSchedule();
@@ -567,22 +609,24 @@ export class SchedulePage {
     }
     
     openSettingsModal() {
-        // 由於 RuleSettings 已經被重構成一個獨立的頁面，這裡應該導向該頁面
-        // 或者，如果 RuleSettings 是一個 Modal，則需要實例化並顯示
-        // 根據 RuleSettings.js 的內容，它是一個 Modal 內容的渲染器
-        
         const { currentUnitId } = this.state;
         if (!currentUnitId) return;
-        
-        // 假設 RuleSettings 是一個 Modal 內容的渲染器
+
+        // ✅ 修正點 4：優化設定頁面載入邏輯
+        // 使用 RuleSettings.js 載入內容並放入 Modal
         import('../settings/RuleSettings.js').then(({ RuleSettings }) => {
             const ruleSettings = new RuleSettings(currentUnitId);
-            ruleSettings.loadSettings().then(() => {
-                const modalContent = document.querySelector('#settings-modal .modal-content');
-                modalContent.innerHTML = ruleSettings.render();
-                ruleSettings.attachEvents();
-                this.settingsModal.show();
-            });
+            // 指定 Modal 內的容器 ID (這個 ID 是在上面 render 方法的 modalHtml 中定義的)
+            ruleSettings.containerId = 'rule-settings-container-modal';
+            
+            // 先顯示 Modal，再載入內容
+            this.settingsModal.show();
+            
+            // 呼叫 render (RuleSettings 會自動處理載入與 DOM 更新)
+            const container = document.getElementById(ruleSettings.containerId);
+            if (container) {
+                container.innerHTML = ruleSettings.render();
+            }
         });
     }
 }
