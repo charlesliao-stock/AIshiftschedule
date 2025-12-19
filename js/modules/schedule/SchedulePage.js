@@ -41,16 +41,40 @@ export class SchedulePage {
     async render() {
         const style = `
             <style>
-                .schedule-table-wrapper { position: relative; max-height: 75vh; width: 100%; overflow: auto; border: 1px solid #ddd; }
-                .schedule-grid th, .schedule-grid td { vertical-align: middle; white-space: nowrap; padding: 0; height: 38px; border-color: #dee2e6; }
+                /* 修改點 1: 強制表格內容置中 (除姓名外) */
+                .schedule-grid th, .schedule-grid td { 
+                    vertical-align: middle; 
+                    white-space: nowrap; 
+                    padding: 0; 
+                    height: 38px; 
+                    border-color: #dee2e6;
+                    text-align: center; /* 預設置中 */
+                }
+                
+                .schedule-table-wrapper { position: relative; height: calc(100vh - 220px); width: 100%; overflow: auto; border: 1px solid #ddd; }
                 
                 /* 固定欄位設定 */
                 .sticky-col { position: sticky; z-index: 10; background-color: #fff; }
-                .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; text-align: center; }
-                .second-col { left: 60px; z-index: 11; width: 80px; text-align: center; }
-                .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 120px; max-width: 150px; overflow: hidden; white-space: normal; font-size: 0.75rem; vertical-align: middle; line-height: 1.2; }
+                .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; }
+                .second-col { left: 60px; z-index: 11; width: 80px; text-align: center; } /* 姓名居中或居左看需求，這裡設居中 */
                 
-                /* 右側統計固定欄 */
+                /* 修改點 2: 備註欄寬度與樣式調整 */
+                .third-col { 
+                    left: 140px; 
+                    z-index: 11; 
+                    border-right: 2px solid #999 !important; 
+                    width: 100px; /* 縮小寬度 */
+                    max-width: 100px; 
+                    overflow: hidden; 
+                    white-space: normal; 
+                    font-size: 0.7rem; 
+                    vertical-align: middle; 
+                    line-height: 1.1; 
+                    text-align: left; /* 備註內容靠左比較好讀 */
+                    padding: 2px !important;
+                }
+                
+                /* 右側統計固定欄 (調整對應新的4個欄位) */
                 .right-col-1 { right: 0; z-index: 11; border-left: 2px solid #ccc !important; width: 45px; background-color: #fff; } 
                 .right-col-2 { right: 45px; z-index: 11; width: 45px; background-color: #fff; }
                 .right-col-3 { right: 90px; z-index: 11; width: 45px; background-color: #fff; }
@@ -171,7 +195,6 @@ export class SchedulePage {
         
         try {
             await this.loadData();
-            // 如果 loadData 判斷需要阻擋(無預班表)，會清空 staffList，renderSchedule 會處理顯示
             this.renderSchedule();
             this.attachEvents();
         } catch (e) {
@@ -183,7 +206,6 @@ export class SchedulePage {
     async loadData() {
         const { currentUnitId, year, month } = this.state;
         
-        // 1. 取得完整單位資訊
         let unitData = await UnitService.getUnitByIdWithCache(currentUnitId);
         if (!unitData.settings) {
             const settingsOnly = await UnitService.getUnitSettings(currentUnitId);
@@ -191,13 +213,10 @@ export class SchedulePage {
         }
         this.state.unitSettings = unitData;
 
-        // 2. 載入預班表 (Wishes)
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         
-        // 3. 載入正式班表
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
 
-        // 嚴格依賴預班表
         if (!this.state.scheduleData) {
             if (!this.state.preSchedule) {
                 this.state.staffList = []; 
@@ -224,7 +243,6 @@ export class SchedulePage {
         
         this.state.daysInMonth = new Date(year, month, 0).getDate();
 
-        // 4. 處理人員名單 (與預班表同步)
         let finalStaffList = [];
         const unitUsers = await userService.getUsersByUnit(currentUnitId);
         const userMap = {};
@@ -274,10 +292,13 @@ export class SchedulePage {
     }
 
     renderHeader(daysInMonth) {
+        // 修改點 4: ID 改為 職編，並保留排序功能
+        // 修改點 2: 備註欄標題換行，縮小版面
+        // 修改點 3: 右側統計欄位更新為 OFF, 假日, 小夜, 大夜
         let html = `<tr>
-            <th class="sticky-col first-col cursor-pointer" data-sort="staffId">ID <i class="fas fa-sort sort-icon"></i></th>
+            <th class="sticky-col first-col cursor-pointer" data-sort="staffId">職編 <i class="fas fa-sort sort-icon"></i></th>
             <th class="sticky-col second-col cursor-pointer" data-sort="name">姓名 <i class="fas fa-sort sort-icon"></i></th>
-            <th class="sticky-col third-col">備註 (狀態/偏好)</th>
+            <th class="sticky-col third-col">備註<br><span style="font-size:0.65rem; color:#666;">(狀態/偏好)</span></th>
         `;
         for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(this.state.year, this.state.month - 1, d);
@@ -288,10 +309,17 @@ export class SchedulePage {
                 ${d}<br><span style="font-size:0.75rem">${weekStr}</span>
             </th>`;
         }
-        html += `<th class="sticky-col right-col-4">總時</th>
-                 <th class="sticky-col right-col-3">夜班</th>
-                 <th class="sticky-col right-col-2">休假</th>
-                 <th class="sticky-col right-col-1">違規</th>
+        
+        // 對應 CSS 的 right-col-4 到 right-col-1 順序 (由左至右: 4->3->2->1，或調整 CSS)
+        // 為了簡單，我們假設：
+        // right-col-4: OFF
+        // right-col-3: 假日
+        // right-col-2: 小夜
+        // right-col-1: 大夜
+        html += `<th class="sticky-col right-col-4">OFF</th>
+                 <th class="sticky-col right-col-3">假日</th>
+                 <th class="sticky-col right-col-2">小夜</th>
+                 <th class="sticky-col right-col-1">大夜</th>
                  </tr>`;
         return html;
     }
@@ -311,11 +339,11 @@ export class SchedulePage {
                 const p1 = sub.preferences.priority1 || '-';
                 const p2 = sub.preferences.priority2 || '-';
                 if(p1 !== '-' || p2 !== '-') {
-                     html += `<div class="mt-1 small text-primary" style="font-size:0.7rem;"><i class="fas fa-heart"></i> ${p1}>${p2}</div>`;
+                     html += `<div class="mt-1 small text-primary" style="font-size:0.65rem; line-height:1;"><i class="fas fa-heart"></i> ${p1}>${p2}</div>`;
                 }
             }
             if (sub.notes) {
-                html += `<div class="mt-1 text-muted text-truncate fst-italic border-top pt-1" title="${sub.notes}" style="font-size: 0.7rem; max-width: 100%;">
+                html += `<div class="mt-1 text-muted text-truncate fst-italic border-top pt-1" title="${sub.notes}" style="font-size: 0.65rem; line-height:1; max-width: 100%;">
                             ${sub.notes}
                          </div>`;
             }
@@ -329,7 +357,6 @@ export class SchedulePage {
     renderStaffRow(staff, assignments, daysInMonth, unitSettings) {
         const uid = staff.uid;
         const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
-        
         const remarksHtml = this._renderRemarks(staff, this.state.preSchedule);
 
         let html = `<tr>
@@ -338,15 +365,16 @@ export class SchedulePage {
                 <div class="fw-bold">${staff.name}</div>
                 <div class="small text-muted" style="font-size:0.7rem;">${staff.title||''}</div>
             </td>
-            <td class="sticky-col third-col text-start px-2 py-1">
+            <td class="sticky-col third-col">
                 ${remarksHtml}
             </td>
         `;
         
-        let totalHours = 0;
-        let totalNights = 0;
-        let totalOff = 0;
-        let violationCount = 0;
+        // 修改點 3: 重新定義統計變數
+        let countOFF = 0;       // 總 OFF 數
+        let countHolidayOFF = 0;// 假日休假數 (週六日休假)
+        let countE = 0;         // 小夜數
+        let countN = 0;         // 大夜數
 
         for (let d = 1; d <= daysInMonth; d++) {
             const shift = assignments[d] || '';
@@ -354,20 +382,18 @@ export class SchedulePage {
 
             const date = new Date(this.state.year, this.state.month - 1, d);
             const dayOfWeek = date.getDay();
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // 0=Sun, 6=Sat
             
+            // 統計邏輯
             if (shift === 'OFF' || shift === 'M_OFF') {
-                totalOff++;
-            } else if (shift) {
-                const shiftDef = unitSettings.settings?.shifts?.find(s => s.code === shift);
-                const hours = parseFloat(shiftDef?.hours || 0);
-                totalHours += hours;
-                if (shift === 'N' || shift === 'E') totalNights++;
-            }
-
-            if (typeof RuleEngine !== 'undefined') {
-                const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
-                if (validation.errors[d]) violationCount++;
+                countOFF++;
+                if (isWeekend) {
+                    countHolidayOFF++;
+                }
+            } else if (shift === 'E') {
+                countE++;
+            } else if (shift === 'N') {
+                countN++;
             }
 
             let cellStyle = this.getShiftStyle(shift);
@@ -388,10 +414,11 @@ export class SchedulePage {
             </td>`;
         }
 
-        html += `<td class="sticky-col right-col-4 text-end fw-bold">${totalHours.toFixed(1)}</td>
-                 <td class="sticky-col right-col-3 text-end fw-bold">${totalNights}</td>
-                 <td class="sticky-col right-col-2 text-end fw-bold">${totalOff}</td>
-                 <td class="sticky-col right-col-1 text-end fw-bold ${violationCount > 0 ? 'text-danger' : 'text-success'}">${violationCount}</td>
+        // 渲染統計結果
+        html += `<td class="sticky-col right-col-4 text-center fw-bold">${countOFF}</td>
+                 <td class="sticky-col right-col-3 text-center fw-bold text-success">${countHolidayOFF}</td>
+                 <td class="sticky-col right-col-2 text-center fw-bold text-warning-dark">${countE}</td>
+                 <td class="sticky-col right-col-1 text-center fw-bold text-danger">${countN}</td>
                  </tr>`;
         return html;
     }
@@ -675,7 +702,6 @@ export class SchedulePage {
     renderVersionTable(assignments, scoreResult) {
         const { staffList, daysInMonth, unitSettings } = this.state;
         
-        // ✅ 修改點 2: 表格高度最大化 (calc 100vh - 220px 預留給 Header 和 Tabs)
         let html = `<div class="schedule-table-wrapper" style="height: calc(100vh - 220px); overflow: auto;">
             <table class="table table-bordered schedule-grid mb-0">
                 <thead id="version-thead">
