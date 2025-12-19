@@ -1036,8 +1036,8 @@ export class AutoScheduler {
             return true;
         });
         
-        // 優先選擇休假天數較少的員工進行填補
-        candidates.sort((a, b) => context.stats[a.uid].OFF - context.stats[b.uid].OFF);
+        // 優先選擇休假天數較多的員工進行填補 (符合使用者要求)
+        candidates.sort((a, b) => context.stats[b.uid].OFF - context.stats[a.uid].OFF);
         
         let fillCount = 0;
         
