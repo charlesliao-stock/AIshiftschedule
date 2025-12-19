@@ -904,8 +904,8 @@ export class AutoScheduler {
     }
 }
 
-    // 檢查是否可以交換班次 (續)
-    static canSwap(context, uid1, uid2, day, shift) {
+// 檢查是否可以交換班次 (續)
+static canSwap(context, uid1, uid2, day, shift) {
         const staff2 = context.staffList.find(s => s.uid === uid2);
         if (!staff2) return false;
         
