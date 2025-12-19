@@ -19,20 +19,18 @@ export class SchedulePage {
             sortKey: 'staffId', 
             sortAsc: true,
             unitMap: {},
-            preSchedule: null
+            preSchedule: null // 關鍵：儲存預班資料
         };
         this.versionsModal = null; 
         this.scoreModal = null;
         this.settingsModal = null; 
         this.generatedVersions = [];
         
-        // 確保 handleGlobalClick 存在後再 bind
         this.handleGlobalClick = this.handleGlobalClick.bind(this);
     }
 
-    // 補上漏掉的方法，防止 bind 報錯
     handleGlobalClick(e) {
-        // 如果未來有點擊空白處關閉選單的需求，寫在這裡
+        // 保留供未來擴充全域點擊事件
     }
 
     cleanup() {
@@ -44,24 +42,34 @@ export class SchedulePage {
     async render() {
         const style = `
             <style>
-                .schedule-table-wrapper { position: relative; max-height: 100%; width: 100%; overflow: auto; }
-                .schedule-grid th, .schedule-grid td { vertical-align: middle; white-space: nowrap; padding: 2px 4px; height: 38px; border-color: #dee2e6; }
+                .schedule-table-wrapper { position: relative; max-height: 75vh; width: 100%; overflow: auto; border: 1px solid #ddd; }
+                .schedule-grid th, .schedule-grid td { vertical-align: middle; white-space: nowrap; padding: 0; height: 38px; border-color: #dee2e6; }
+                
+                /* 固定欄位設定 */
                 .sticky-col { position: sticky; z-index: 10; background-color: #fff; }
-                .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; }
-                .second-col { left: 60px; z-index: 11; width: 80px; }
+                .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; text-align: center; }
+                .second-col { left: 60px; z-index: 11; width: 80px; text-align: center; }
                 .third-col { left: 140px; z-index: 11; border-right: 2px solid #999 !important; width: 100px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+                
+                /* 右側統計固定欄 */
                 .right-col-1 { right: 0; z-index: 11; border-left: 2px solid #ccc !important; width: 45px; background-color: #fff; } 
                 .right-col-2 { right: 45px; z-index: 11; width: 45px; background-color: #fff; }
                 .right-col-3 { right: 90px; z-index: 11; width: 45px; background-color: #fff; }
                 .right-col-4 { right: 135px; z-index: 11; border-left: 2px solid #999 !important; width: 45px; background-color: #fff; }
+                
                 thead .sticky-col { z-index: 15 !important; background-color: #f8f9fa; }
+                
                 .bg-light-gray { background-color: #f8f9fa !important; color: #aaa; }
-                .shift-input:focus { background-color: #e8f0fe !important; font-weight: bold; outline: none; }
+                .shift-input { border: none; width: 100%; height: 100%; text-align: center; background: transparent; font-weight: 500; }
+                .shift-input:focus { background-color: #e8f0fe !important; outline: 2px solid #0d6efd; z-index: 5; position: relative; }
+                
                 .cursor-pointer { cursor: pointer; }
-                .shift-cell { cursor: pointer; transition: background 0.1s; }
-                .shift-cell:hover { background-color: #e9ecef; }
                 .sort-icon { font-size: 0.7rem; margin-left: 2px; color: #666; }
                 .stats-row td { background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #666 !important; }
+
+                /* 預班標記 */
+                .wish-cell { position: relative; }
+                .wish-marker { position: absolute; top: 1px; right: 1px; font-size: 0.6rem; color: #dc3545; font-weight: bold; z-index: 4; pointer-events: none; }
             </style>
         `;
 
@@ -72,7 +80,6 @@ export class SchedulePage {
 
         if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
 
-        // 補上 settings-modal 的 HTML 結構
         const modalHtml = `
             <div class="modal fade" id="versions-modal" tabindex="-1">
                 <div class="modal-dialog modal-xl">
@@ -81,8 +88,7 @@ export class SchedulePage {
                             <h5 class="modal-title"><i class="fas fa-robot me-2"></i>AI 智慧排班結果選擇</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body" id="versions-modal-body">
-                            </div>
+                        <div class="modal-body" id="versions-modal-body"></div>
                     </div>
                 </div>
             </div>
@@ -93,8 +99,7 @@ export class SchedulePage {
                             <h5 class="modal-title"><i class="fas fa-star me-2"></i>排班品質評分細節</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body" id="score-modal-body">
-                            </div>
+                        <div class="modal-body" id="score-modal-body"></div>
                     </div>
                 </div>
             </div>
@@ -114,17 +119,28 @@ export class SchedulePage {
         return `
             ${style}
             ${modalHtml}
-            <div class="container-fluid mt-4">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h3 class="text-gray-800 fw-bold"><i class="fas fa-calendar-alt"></i> 排班作業：<span id="schedule-title">載入中...</span></h3>
+            <div class="container-fluid mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-3 p-3 bg-white shadow-sm rounded">
+                    <div class="d-flex align-items-center gap-3">
+                        <h4 class="text-gray-800 fw-bold mb-0"><i class="fas fa-calendar-alt"></i> <span id="schedule-title">載入中...</span></h4>
+                        <div id="score-display-card" class="d-flex align-items-center px-3 py-1 bg-light rounded border cursor-pointer" onclick="window.routerPage.openScoreModal()">
+                            <span class="text-muted me-2 small">評分</span>
+                            <h4 class="mb-0 fw-bold text-secondary" id="score-display">--</h4>
+                            <span class="ms-1 small">分</span>
+                        </div>
+                    </div>
+                    
                     <div class="d-flex gap-2">
-                        <button id="btn-settings" class="btn btn-secondary shadow-sm" onclick="window.routerPage.openSettingsModal()">
-                            <i class="fas fa-cog"></i> 規則與評分設定
+                        <button id="btn-settings" class="btn btn-outline-secondary" onclick="window.routerPage.openSettingsModal()">
+                            <i class="fas fa-cog"></i> 設定
                         </button>
-                        <button id="btn-ai-schedule" class="btn btn-primary shadow-sm" onclick="window.routerPage.openVersionsModal()">
+                        <button id="btn-reset" class="btn btn-outline-danger" onclick="window.routerPage.resetToPreSchedule()">
+                            <i class="fas fa-undo"></i> 重置 (載入預班)
+                        </button>
+                        <button id="btn-ai-schedule" class="btn btn-primary" onclick="window.routerPage.openVersionsModal()">
                             <i class="fas fa-robot"></i> AI 智慧排班
                         </button>
-                        <button id="btn-save" class="btn btn-success shadow-sm" onclick="window.routerPage.saveSchedule()">
+                        <button id="btn-save" class="btn btn-success" onclick="window.routerPage.saveSchedule()">
                             <i class="fas fa-save"></i> 儲存排班
                         </button>
                     </div>
@@ -149,7 +165,6 @@ export class SchedulePage {
         this.versionsModal = new bootstrap.Modal(document.getElementById('versions-modal'));
         this.scoreModal = new bootstrap.Modal(document.getElementById('score-modal'));
         
-        // 確保 settings-modal 存在後再初始化
         const settingsEl = document.getElementById('settings-modal');
         if (settingsEl) {
             this.settingsModal = new bootstrap.Modal(settingsEl);
@@ -171,15 +186,16 @@ export class SchedulePage {
         // 1. 載入單位設定
         this.state.unitSettings = await UnitService.getUnitSettings(currentUnitId);
         
-        // 2. 載入員工列表
-        // ✅ 修正點：使用 getUsersByUnit 而不是 getStaffListByUnit
+        // 2. 載入員工列表 (使用 getUsersByUnit 確保一致性)
         this.state.staffList = await userService.getUsersByUnit(currentUnitId);
         
-        // 3. 載入預排班表 (Pre-Schedule)
+        // 3. 載入預排班表 (Pre-Schedule) - 這是關鍵，必須載入才能顯示 Wishes
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         
         // 4. 載入排班表
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
+        
+        // 如果沒有排班資料，創建一個空的 (並嘗試預填預班)
         if (!this.state.scheduleData) {
             this.state.scheduleData = {
                 unitId: currentUnitId, year, month,
@@ -188,6 +204,8 @@ export class SchedulePage {
                 version: 0,
                 activeVersion: 0
             };
+            // 若為新建立，自動執行一次預班載入 (不提示)
+            this.performReset(false);
         }
         
         // 5. 計算天數
@@ -201,7 +219,6 @@ export class SchedulePage {
     renderSchedule() {
         const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
         
-        // 若無員工資料，顯示提示
         if (!staffList || staffList.length === 0) {
             document.getElementById('schedule-tbody').innerHTML = '<tr><td colspan="100" class="text-center py-5">此單位尚無人員資料</td></tr>';
             return;
@@ -219,14 +236,15 @@ export class SchedulePage {
             return 0;
         });
 
-        // 渲染表頭
         const thead = document.getElementById('schedule-thead');
         if(thead) thead.innerHTML = this.renderHeader(daysInMonth);
 
-        // 渲染表身
         const tbody = document.getElementById('schedule-tbody');
         if(tbody) {
-            tbody.innerHTML = staffList.map(staff => this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)).join('');
+            tbody.innerHTML = staffList.map(staff => 
+                this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)
+            ).join('');
+            
             // 渲染統計行
             tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
         }
@@ -245,7 +263,10 @@ export class SchedulePage {
             const date = new Date(this.state.year, this.state.month - 1, d);
             const dayOfWeek = date.getDay();
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            html += `<th class="${isWeekend ? 'bg-light-gray' : ''}">${d}</th>`;
+            const weekStr = ['日','一','二','三','四','五','六'][dayOfWeek];
+            html += `<th class="${isWeekend ? 'bg-light-gray text-danger' : ''}">
+                ${d}<br><span style="font-size:0.75rem">${weekStr}</span>
+            </th>`;
         }
         html += `<th class="sticky-col right-col-4">總時</th>
                  <th class="sticky-col right-col-3">夜班</th>
@@ -257,10 +278,13 @@ export class SchedulePage {
 
     renderStaffRow(staff, assignments, daysInMonth, unitSettings) {
         const uid = staff.uid;
+        // 取得該員工的預班資料 (Wishes)
+        const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
+
         let html = `<tr>
-            <td class="sticky-col first-col">${staff.staffId}</td>
+            <td class="sticky-col first-col">${staff.staffId || ''}</td>
             <td class="sticky-col second-col">${staff.name}</td>
-            <td class="sticky-col third-col small text-truncate" title="${staff.constraints?.isPregnant ? '懷孕' : ''}">${staff.constraints?.isPregnant ? '🤰' : ''}</td>
+            <td class="sticky-col third-col small text-truncate" title="${staff.note || ''}">${staff.note || ''}</td>
         `;
         
         let totalHours = 0;
@@ -270,12 +294,13 @@ export class SchedulePage {
 
         for (let d = 1; d <= daysInMonth; d++) {
             const shift = assignments[d] || '';
+            const wish = wishes[d]; // 檢查是否有預班
+
             const date = new Date(this.state.year, this.state.month - 1, d);
             const dayOfWeek = date.getDay();
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            const shiftClass = this.getShiftClass(shift);
             
-            // 計算統計數據
+            // 計算統計
             if (shift === 'OFF' || shift === 'M_OFF') {
                 totalOff++;
             } else if (shift) {
@@ -285,14 +310,30 @@ export class SchedulePage {
                 if (shift === 'N' || shift === 'E') totalNights++;
             }
 
-            // 檢查單日違規
+            // 檢查違規 (簡單版)
             if (typeof RuleEngine !== 'undefined') {
                 const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
                 if (validation.errors[d]) violationCount++;
             }
 
-            html += `<td class="shift-cell ${shiftClass} ${isWeekend ? 'bg-light-gray' : ''}" data-uid="${uid}" data-day="${d}">
-                <input type="text" class="form-control form-control-sm text-center shift-input" value="${shift}" maxlength="3" data-uid="${uid}" data-day="${d}">
+            // 視覺處理：如果班表與 Wish 不同，或 Wish 存在，顯示提示
+            let cellStyle = this.getShiftStyle(shift);
+            let markerHtml = '';
+            
+            if (wish) {
+                // 如果有 Wish，顯示小標記 (例如紅色的 "預")
+                markerHtml = `<div class="wish-marker" title="預班: ${wish}">●</div>`;
+                // 如果目前的排班不符合預班，背景色微調提示 (可選)
+                if (wish !== shift) {
+                   cellStyle += 'background-color: #fff3cd !important;'; // 黃色警示
+                }
+            }
+            if (isWeekend) cellStyle += 'background-color: #f8f9fa;';
+
+            html += `<td class="shift-cell wish-cell" style="${cellStyle}" data-uid="${uid}" data-day="${d}">
+                ${markerHtml}
+                <input type="text" class="shift-input" value="${shift}" maxlength="3" data-uid="${uid}" data-day="${d}" 
+                       style="background:transparent; color: inherit;">
             </td>`;
         }
 
@@ -316,14 +357,13 @@ export class SchedulePage {
 
         for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(this.state.year, this.state.month - 1, d);
-            const dayOfWeek = date.getDay();
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
             
             let required = 0;
             let assigned = 0;
             
             shiftCodes.forEach(code => {
-                required += staffReq[code]?.[dayOfWeek] || 0;
+                required += staffReq[code]?.[date.getDay()] || 0;
             });
 
             Object.keys(assignments).forEach(uid => {
@@ -341,28 +381,25 @@ export class SchedulePage {
             </td>`;
         }
 
-        html += `<td class="sticky-col right-col-4"></td>
-                 <td class="sticky-col right-col-3"></td>
-                 <td class="sticky-col right-col-2"></td>
-                 <td class="sticky-col right-col-1"></td>
-                 </tr>`;
+        html += `<td class="sticky-col right-col-4"></td><td class="sticky-col right-col-3"></td><td class="sticky-col right-col-2"></td><td class="sticky-col right-col-1"></td></tr>`;
         return html;
     }
 
-    getShiftClass(shift) {
-        switch (shift) {
-            case 'D': return 'bg-info text-white';
-            case 'E': return 'bg-warning text-dark';
-            case 'N': return 'bg-dark text-white';
-            case 'OFF': return 'bg-light text-dark';
-            case 'M_OFF': return 'bg-danger text-white';
-            default: return '';
-        }
+    getShiftStyle(shift) {
+        // 簡單配色，可根據 ShiftSettings 動態調整
+        if (!shift) return '';
+        if (shift === 'OFF') return 'background-color: #f0f0f0; color: #999;';
+        if (shift === 'M_OFF') return 'background-color: #dc3545; color: white;';
+        if (shift === 'N') return 'background-color: #212529; color: white;';
+        if (shift === 'E') return 'background-color: #ffc107; color: #000;';
+        if (shift === 'D') return 'background-color: #d1e7dd; color: #0f5132;';
+        return '';
     }
 
     attachEvents() {
         document.addEventListener('click', this.handleGlobalClick);
         
+        // 排序事件
         const thead = document.getElementById('schedule-thead');
         if (thead) {
             thead.addEventListener('click', (e) => {
@@ -380,6 +417,7 @@ export class SchedulePage {
             });
         }
 
+        // 輸入事件
         const tbody = document.getElementById('schedule-tbody');
         if (tbody) {
             tbody.addEventListener('change', (e) => {
@@ -392,9 +430,7 @@ export class SchedulePage {
                     this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
                     this.state.scheduleData.assignments[uid][day] = shift;
                     
-                    const cell = input.closest('.shift-cell');
-                    cell.className = `shift-cell ${this.getShiftClass(shift)} ${cell.classList.contains('bg-light-gray') ? 'bg-light-gray' : ''}`;
-                    
+                    // 重新計算樣式與統計
                     this.renderSchedule();
                 }
             });
@@ -404,7 +440,6 @@ export class SchedulePage {
     async calculateScore() {
         const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
         if (!scheduleData || !unitSettings || !preSchedule) return;
-
         if (typeof ScoringService === 'undefined') return;
 
         const scoreResult = ScoringService.calculate(scheduleData, staffList, unitSettings, preSchedule);
@@ -412,8 +447,8 @@ export class SchedulePage {
         
         const scoreDisplay = document.getElementById('score-display');
         if (scoreDisplay) {
-            scoreDisplay.textContent = `${scoreResult.totalScore} 分`;
-            scoreDisplay.className = `badge fs-6 ${scoreResult.passed ? 'bg-success' : 'bg-warning'}`;
+            scoreDisplay.textContent = `${scoreResult.totalScore}`;
+            scoreDisplay.className = `mb-0 fw-bold ${scoreResult.passed ? 'text-success' : 'text-danger'}`;
         }
     }
 
@@ -433,21 +468,13 @@ export class SchedulePage {
                 <div class="col-md-6 mb-4">
                     <div class="card border-left-${color} shadow h-100">
                         <div class="card-body">
-                            <div class="row no-gutters align-items-center">
-                                <div class="col mr-2">
-                                    <div class="text-xs fw-bold text-${color} text-uppercase mb-1">${detail.label}</div>
-                                    <div class="h5 mb-0 fw-bold text-gray-800">${detail.score} / ${detail.max} 分</div>
-                                </div>
-                                <div class="col-auto">
-                                    <i class="fas fa-chart-line fa-2x text-gray-300"></i>
-                                </div>
-                            </div>
-                            <hr class="my-2">
-                            <ul class="list-unstyled small">
+                            <h6 class="text-${color} fw-bold text-uppercase mb-2">${detail.label}</h6>
+                            <div class="h4 fw-bold text-gray-800 mb-2">${detail.score} / ${detail.max} 分</div>
+                            <ul class="list-unstyled small mb-0">
                                 ${detail.subItems.map(item => `
-                                    <li>
-                                        <span class="fw-bold">${item.name}:</span> 
-                                        <span class="float-end">${item.value} (${item.grade})</span>
+                                    <li class="d-flex justify-content-between border-bottom py-1">
+                                        <span>${item.name}</span> 
+                                        <span>${item.value} (${item.grade})</span>
                                     </li>
                                 `).join('')}
                             </ul>
@@ -456,15 +483,50 @@ export class SchedulePage {
                 </div>
             `;
         });
-        
         html += `</div>`;
         body.innerHTML = html;
         this.scoreModal.show();
     }
 
+    // --- 重置功能 (恢復舊版功能) ---
+    resetToPreSchedule() {
+        if(confirm("確定重置？將清除所有目前手動排班內容，並載入預班資料。")) {
+            this.performReset(true);
+        }
+    }
+
+    performReset(refreshUI = true) {
+        const { preSchedule, staffList } = this.state;
+        const newAssignments = {};
+        
+        // 初始化所有員工的空物件
+        staffList.forEach(s => { newAssignments[s.uid] = {}; });
+        
+        // 填入預班資料
+        if (preSchedule && preSchedule.submissions) {
+            Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
+                if(sub.wishes && newAssignments[uid]) {
+                    Object.entries(sub.wishes).forEach(([d, w]) => { 
+                        // M_OFF 轉為 OFF (或保留 M_OFF 視系統邏輯而定)
+                        newAssignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w); 
+                    });
+                }
+            });
+        }
+        
+        this.state.scheduleData.assignments = newAssignments;
+        if (refreshUI) {
+            this.renderSchedule();
+            alert("✅ 已重置為預班狀態");
+        }
+    }
+
+    // --- AI 排班相關 ---
     async openVersionsModal() {
         const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
-        if (!scheduleData || !unitSettings || !preSchedule) {
+        
+        // 檢查 preSchedule 是否有效，因為 AutoScheduler 需要它
+        if (!scheduleData || !unitSettings) {
             alert('資料尚未載入完成，請稍後再試。');
             return;
         }
@@ -476,20 +538,29 @@ export class SchedulePage {
         this.generatedVersions = [];
         const strategies = ['A', 'B', 'C']; 
 
+        // 為了確保 AutoScheduler 拿到正確的預班資料，確保 preSchedule 物件完整
+        const aiPreSchedule = preSchedule || { submissions: {}, year: this.state.year, month: this.state.month };
+
         for (let i = 0; i < strategies.length; i++) {
             const strategyCode = strategies[i];
             
             if (typeof AutoScheduler !== 'undefined') {
-                const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, preSchedule, strategyCode);
-                
-                const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
-                
-                this.generatedVersions.push({
-                    strategyCode,
-                    assignments: result.assignments,
-                    scoreResult,
-                    logs: result.logs
-                });
+                try {
+                    // 呼叫 AI 引擎
+                    const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, aiPreSchedule, strategyCode);
+                    
+                    // 計算評分
+                    const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, aiPreSchedule);
+                    
+                    this.generatedVersions.push({
+                        strategyCode,
+                        assignments: result.assignments,
+                        scoreResult,
+                        logs: result.logs
+                    });
+                } catch (e) {
+                    console.error("AI Error:", e);
+                }
             }
         }
 
@@ -500,7 +571,7 @@ export class SchedulePage {
         const modalBody = document.getElementById('versions-modal-body');
         
         if (this.generatedVersions.length === 0) {
-            modalBody.innerHTML = `<div class="text-center p-5 text-danger">AI 排班生成失敗，請檢查 AutoScheduler。</div>`;
+            modalBody.innerHTML = `<div class="text-center p-5 text-danger">AI 排班生成失敗，請檢查 Console 或稍後再試。</div>`;
             return;
         }
 
@@ -509,11 +580,7 @@ export class SchedulePage {
 
         this.generatedVersions.forEach((version, index) => {
             const isActive = index === 0;
-            const strategyMap = {
-                'A': '方案 A: 數值平衡 (公平優先)',
-                'B': '方案 B: 願望優先 (滿意度高)',
-                'C': '方案 C: 規律作息 (減少換班)'
-            };
+            const strategyMap = { 'A': '方案 A: 數值平衡', 'B': '方案 B: 願望優先', 'C': '方案 C: 規律作息' };
             const strategyName = strategyMap[version.strategyCode] || `版本 ${index + 1}`;
             const score = version.scoreResult.totalScore;
             const scoreClass = version.scoreResult.passed ? 'bg-success' : 'bg-warning';
@@ -521,7 +588,7 @@ export class SchedulePage {
             navHtml += `
                 <li class="nav-item" role="presentation">
                     <button class="nav-link ${isActive ? 'active' : ''}" id="version-${index}-tab" data-bs-toggle="tab" data-bs-target="#version-${index}" type="button" role="tab">
-                        版本 ${index + 1} <span class="badge ${scoreClass} ms-2">${score} 分</span>
+                        ${strategyName} <span class="badge ${scoreClass} ms-2">${score} 分</span>
                     </button>
                 </li>
             `;
@@ -530,7 +597,6 @@ export class SchedulePage {
                 <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="version-${index}" role="tabpanel">
                     <div class="d-flex justify-content-between align-items-center mb-3 pt-3">
                         <h5 class="fw-bold text-primary">${score} 分</h5>
-                        <span class="badge bg-secondary">${strategyName}</span>
                         <button class="btn btn-primary btn-sm" onclick="window.routerPage.applyVersion(${index})">套用此版本</button>
                     </div>
                     ${this.renderVersionTable(version.assignments, version.scoreResult)}
@@ -559,7 +625,7 @@ export class SchedulePage {
             </table>
         </div>
         <div class="mt-3">
-            <h6 class="fw-bold">評分細節 <button class="btn btn-sm btn-outline-success ms-2" onclick="window.routerPage.openScoreModal(${this.generatedVersions.findIndex(v => v.assignments === assignments)})">查看完整評分</button></h6>
+            <h6 class="fw-bold">評分細節</h6>
             ${this.renderScoreSummary(scoreResult)}
         </div>
         `;
@@ -570,13 +636,11 @@ export class SchedulePage {
         let html = `<div class="row g-2 small">`;
         Object.keys(scoreResult.details).forEach(key => {
             const detail = scoreResult.details[key];
-            const colorMap = { fairness: 'primary', regularity: 'warning', satisfaction: 'info', efficiency: 'success', cost: 'secondary' };
-            const color = colorMap[key] || 'secondary';
-            
+            const color = detail.score < (detail.max * 0.6) ? 'danger' : 'success';
             html += `
                 <div class="col-md-3">
-                    <span class="badge bg-${color}">${detail.label}</span>
-                    <span class="fw-bold ms-1">${detail.score} / ${detail.max}</span>
+                    <span class="badge bg-light text-dark border">${detail.label}</span>
+                    <span class="fw-bold ms-1 text-${color}">${detail.score} / ${detail.max}</span>
                 </div>
             `;
         });
@@ -587,12 +651,15 @@ export class SchedulePage {
     applyVersion(index) {
         const version = this.generatedVersions[index];
         if (version) {
-            this.state.scheduleData.assignments = version.assignments;
+            if(!confirm(`確定套用此 AI 版本 (${version.scoreResult.totalScore}分)？這將覆蓋目前的排班。`)) return;
+            
+            // 深拷貝以避免參考問題
+            this.state.scheduleData.assignments = JSON.parse(JSON.stringify(version.assignments));
             this.state.scheduleData.version = (this.state.scheduleData.version || 0) + 1;
-            this.state.scheduleData.activeVersion = this.state.scheduleData.version;
+            
             this.versionsModal.hide();
             this.renderSchedule();
-            alert(`已套用版本 ${index + 1}。請記得儲存排班。`);
+            alert(`✅ 已套用 AI 班表。請記得點擊「儲存排班」以寫入資料庫。`);
         }
     }
 
@@ -602,7 +669,7 @@ export class SchedulePage {
 
         try {
             await ScheduleService.saveSchedule(currentUnitId, year, month, scheduleData);
-            alert('排班表已成功儲存！');
+            alert('✅ 排班表已成功儲存！');
         } catch (e) {
             alert('儲存失敗: ' + e.message);
         }
@@ -615,23 +682,16 @@ export class SchedulePage {
         import('../settings/RuleSettings.js').then(({ RuleSettings }) => {
             const ruleSettings = new RuleSettings(currentUnitId);
             ruleSettings.containerId = 'rule-settings-container-modal';
-            
             this.settingsModal.show();
             
             const container = document.getElementById(ruleSettings.containerId);
             if (container) {
                 container.innerHTML = ruleSettings.render();
-                // 若 render 是同步回傳字串，需手動呼叫初始化
-                // 若 render 內部有 async init，則需等待
+                // 處理 RuleSettings 的初始化邏輯
                 if (ruleSettings.loadRules) {
-                    ruleSettings.loadRules(currentUnitId).then(() => {
-                        // 重新 render 內容
-                        // 注意：RuleSettings.js 的設計可能不同，這裡假設它會自動處理
-                    });
+                    ruleSettings.loadRules(currentUnitId).then(() => {});
                 }
-                // 重要：綁定事件
                 if (ruleSettings.afterRender) {
-                     // 稍微延遲以確保 DOM 已插入
                     setTimeout(() => ruleSettings.afterRender(), 50);
                 }
             }
