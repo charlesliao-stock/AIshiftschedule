@@ -563,7 +563,7 @@ export class AutoScheduler {
                 }
                 // 每次迭代只交換一次，以確保平衡度計算準確
                 if (swappedThisUser) break; 
-            }`);
+            }
             
             if (swapCount === 0) {
                 console.log("    ⚠️ 無法進一步優化 OFF");
