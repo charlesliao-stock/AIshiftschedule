@@ -19,7 +19,7 @@ export class SchedulePage {
             sortKey: 'staffId', 
             sortAsc: true,
             unitMap: {},
-            preSchedule: null // 關鍵：儲存預班資料
+            preSchedule: null // 儲存預班資料
         };
         this.versionsModal = null; 
         this.scoreModal = null;
@@ -183,19 +183,14 @@ export class SchedulePage {
     async loadData() {
         const { currentUnitId, year, month } = this.state;
         
-        // 1. 載入單位設定
         this.state.unitSettings = await UnitService.getUnitSettings(currentUnitId);
-        
-        // 2. 載入員工列表 (使用 getUsersByUnit 確保一致性)
         this.state.staffList = await userService.getUsersByUnit(currentUnitId);
         
-        // 3. 載入預排班表 (Pre-Schedule) - 這是關鍵，必須載入才能顯示 Wishes
+        // 載入預班表 (Wishes)
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         
-        // 4. 載入排班表
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
         
-        // 如果沒有排班資料，創建一個空的 (並嘗試預填預班)
         if (!this.state.scheduleData) {
             this.state.scheduleData = {
                 unitId: currentUnitId, year, month,
@@ -204,14 +199,11 @@ export class SchedulePage {
                 version: 0,
                 activeVersion: 0
             };
-            // 若為新建立，自動執行一次預班載入 (不提示)
             this.performReset(false);
         }
         
-        // 5. 計算天數
         this.state.daysInMonth = new Date(year, month, 0).getDate();
         
-        // 6. 更新標題
         const unitName = this.state.unitSettings.unitName || '未命名單位';
         document.getElementById('schedule-title').textContent = `${unitName} ${year}年${month}月`;
     }
@@ -227,7 +219,6 @@ export class SchedulePage {
         const staffMap = {};
         staffList.forEach(s => staffMap[s.uid] = s);
 
-        // 排序員工列表
         staffList.sort((a, b) => {
             const valA = a[this.state.sortKey] || '';
             const valB = b[this.state.sortKey] || '';
@@ -245,11 +236,9 @@ export class SchedulePage {
                 this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)
             ).join('');
             
-            // 渲染統計行
             tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
         }
 
-        // 重新計算評分
         this.calculateScore();
     }
 
@@ -278,7 +267,6 @@ export class SchedulePage {
 
     renderStaffRow(staff, assignments, daysInMonth, unitSettings) {
         const uid = staff.uid;
-        // 取得該員工的預班資料 (Wishes)
         const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
 
         let html = `<tr>
@@ -294,13 +282,12 @@ export class SchedulePage {
 
         for (let d = 1; d <= daysInMonth; d++) {
             const shift = assignments[d] || '';
-            const wish = wishes[d]; // 檢查是否有預班
+            const wish = wishes[d];
 
             const date = new Date(this.state.year, this.state.month - 1, d);
             const dayOfWeek = date.getDay();
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
             
-            // 計算統計
             if (shift === 'OFF' || shift === 'M_OFF') {
                 totalOff++;
             } else if (shift) {
@@ -310,22 +297,18 @@ export class SchedulePage {
                 if (shift === 'N' || shift === 'E') totalNights++;
             }
 
-            // 檢查違規 (簡單版)
             if (typeof RuleEngine !== 'undefined') {
                 const validation = RuleEngine.validateStaff(assignments, d, unitSettings.settings?.shifts, unitSettings.rules, staff.constraints, assignments[0], staff.lastMonthConsecutive, d);
                 if (validation.errors[d]) violationCount++;
             }
 
-            // 視覺處理：如果班表與 Wish 不同，或 Wish 存在，顯示提示
             let cellStyle = this.getShiftStyle(shift);
             let markerHtml = '';
             
             if (wish) {
-                // 如果有 Wish，顯示小標記 (例如紅色的 "預")
                 markerHtml = `<div class="wish-marker" title="預班: ${wish}">●</div>`;
-                // 如果目前的排班不符合預班，背景色微調提示 (可選)
                 if (wish !== shift) {
-                   cellStyle += 'background-color: #fff3cd !important;'; // 黃色警示
+                   cellStyle += 'background-color: #fff3cd !important;'; 
                 }
             }
             if (isWeekend) cellStyle += 'background-color: #f8f9fa;';
@@ -386,7 +369,6 @@ export class SchedulePage {
     }
 
     getShiftStyle(shift) {
-        // 簡單配色，可根據 ShiftSettings 動態調整
         if (!shift) return '';
         if (shift === 'OFF') return 'background-color: #f0f0f0; color: #999;';
         if (shift === 'M_OFF') return 'background-color: #dc3545; color: white;';
@@ -399,7 +381,6 @@ export class SchedulePage {
     attachEvents() {
         document.addEventListener('click', this.handleGlobalClick);
         
-        // 排序事件
         const thead = document.getElementById('schedule-thead');
         if (thead) {
             thead.addEventListener('click', (e) => {
@@ -417,7 +398,6 @@ export class SchedulePage {
             });
         }
 
-        // 輸入事件
         const tbody = document.getElementById('schedule-tbody');
         if (tbody) {
             tbody.addEventListener('change', (e) => {
@@ -430,7 +410,6 @@ export class SchedulePage {
                     this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
                     this.state.scheduleData.assignments[uid][day] = shift;
                     
-                    // 重新計算樣式與統計
                     this.renderSchedule();
                 }
             });
@@ -488,7 +467,6 @@ export class SchedulePage {
         this.scoreModal.show();
     }
 
-    // --- 重置功能 (恢復舊版功能) ---
     resetToPreSchedule() {
         if(confirm("確定重置？將清除所有目前手動排班內容，並載入預班資料。")) {
             this.performReset(true);
@@ -499,15 +477,12 @@ export class SchedulePage {
         const { preSchedule, staffList } = this.state;
         const newAssignments = {};
         
-        // 初始化所有員工的空物件
         staffList.forEach(s => { newAssignments[s.uid] = {}; });
         
-        // 填入預班資料
         if (preSchedule && preSchedule.submissions) {
             Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
                 if(sub.wishes && newAssignments[uid]) {
                     Object.entries(sub.wishes).forEach(([d, w]) => { 
-                        // M_OFF 轉為 OFF (或保留 M_OFF 視系統邏輯而定)
                         newAssignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w); 
                     });
                 }
@@ -521,11 +496,9 @@ export class SchedulePage {
         }
     }
 
-    // --- AI 排班相關 ---
     async openVersionsModal() {
         const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
         
-        // 檢查 preSchedule 是否有效，因為 AutoScheduler 需要它
         if (!scheduleData || !unitSettings) {
             alert('資料尚未載入完成，請稍後再試。');
             return;
@@ -538,19 +511,28 @@ export class SchedulePage {
         this.generatedVersions = [];
         const strategies = ['A', 'B', 'C']; 
 
-        // 為了確保 AutoScheduler 拿到正確的預班資料，確保 preSchedule 物件完整
-        const aiPreSchedule = preSchedule || { submissions: {}, year: this.state.year, month: this.state.month };
+        // ✅ 修正：建構符合 AutoScheduler 預期的 Context 物件
+        let prevY = this.state.year;
+        let prevM = this.state.month - 1;
+        if (prevM === 0) { prevM = 12; prevY--; }
+
+        const aiContext = {
+            year: prevY,
+            month: prevM,
+            // 放入上個月的班表，讓 AI 判斷接續性
+            assignments: scheduleData.prevAssignments || {},
+            // 放入這個月的預班/願望
+            submissions: preSchedule?.submissions || {} 
+        };
 
         for (let i = 0; i < strategies.length; i++) {
             const strategyCode = strategies[i];
             
             if (typeof AutoScheduler !== 'undefined') {
                 try {
-                    // 呼叫 AI 引擎
-                    const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, aiPreSchedule, strategyCode);
+                    const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, aiContext, strategyCode);
                     
-                    // 計算評分
-                    const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, aiPreSchedule);
+                    const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
                     
                     this.generatedVersions.push({
                         strategyCode,
@@ -571,7 +553,7 @@ export class SchedulePage {
         const modalBody = document.getElementById('versions-modal-body');
         
         if (this.generatedVersions.length === 0) {
-            modalBody.innerHTML = `<div class="text-center p-5 text-danger">AI 排班生成失敗，請檢查 Console 或稍後再試。</div>`;
+            modalBody.innerHTML = `<div class="text-center p-5 text-danger">AI 排班生成失敗，請檢查 AutoScheduler。</div>`;
             return;
         }
 
@@ -687,7 +669,6 @@ export class SchedulePage {
             const container = document.getElementById(ruleSettings.containerId);
             if (container) {
                 container.innerHTML = ruleSettings.render();
-                // 處理 RuleSettings 的初始化邏輯
                 if (ruleSettings.loadRules) {
                     ruleSettings.loadRules(currentUnitId).then(() => {});
                 }
