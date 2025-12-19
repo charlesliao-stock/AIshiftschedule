@@ -1,6 +1,6 @@
 import { UnitService } from "../../services/firebase/UnitService.js";
 import { authService } from "../../services/firebase/AuthService.js";
-import { ScoringService } from "../../services/ScoringService.js"; //
+import { ScoringService } from "../../services/ScoringService.js"; 
 
 export class RuleSettings {
     constructor() { 
@@ -27,80 +27,86 @@ export class RuleSettings {
                         </div>
                     </div>
                 </div>
-                
-                <div id="rule-content" style="display:none;">
-                    <ul class="nav nav-tabs mb-3" id="ruleTabs">
-                        <li class="nav-item"><button class="nav-link active fw-bold" data-bs-toggle="tab" data-bs-target="#tab-min">人力需求 (Hard)</button></li>
-                        <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="tab" data-bs-target="#tab-constraints">排班設定 (Rules)</button></li>
-                        <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="tab" data-bs-target="#tab-scoring">評分權重 (Soft)</button></li>
-                    </ul>
 
-                    <div class="tab-content">
-                        <div class="tab-pane fade show active" id="tab-min">
-                            <div class="card shadow mb-4">
-                                <div class="card-body">
-                                    <table class="table table-bordered text-center table-sm align-middle">
-                                        <thead class="table-light"><tr><th style="width:10%">班別</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th class="text-danger">六</th><th class="text-danger">日</th></tr></thead>
-                                        <tbody>${this.renderRow('D', '白班')}${this.renderRow('E', '小夜')}${this.renderRow('N', '大夜')}</tbody>
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="card shadow mb-4">
+                            <div class="card-header py-3 bg-white border-bottom-danger">
+                                <h6 class="m-0 font-weight-bold text-danger"><i class="fas fa-gavel"></i> 硬性規則 (違反視為不合法)</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3 form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="rule-min-interval-11">
+                                    <label class="form-check-label fw-bold">班距必須大於 11 小時</label>
+                                    <div class="form-text small">防止接班過於緊湊 (如 N 接 D)。</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">每月最多幾種班別 (Shift Types)</label>
+                                    <input type="number" id="rule-max-shift-types" class="form-control" value="2" min="1" max="5">
+                                    <div class="form-text small">例如設為 2，則一個人當月只能排 D/E 或 E/N，不能 D/E/N 全包。</div>
+                                </div>
+
+                                <div class="mb-3 form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="rule-pre-night-off">
+                                    <label class="form-check-label fw-bold">大夜班前一天必須 OFF</label>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label fw-bold">最少連續上班天數</label>
+                                        <input type="number" id="rule-min-consecutive" class="form-control" value="1" min="1">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label fw-bold">最大連續上班天數</label>
+                                        <input type="number" id="rule-max-work-days" class="form-control" value="6" min="1" max="12">
+                                        <div class="form-text small">勞基法通常建議不超過 6 或 7 天。</div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">連續夜班上限 (天)</label>
+                                    <input type="number" id="rule-max-night-consecutive" class="form-control" value="4" min="1">
+                                    <div class="form-text small">避免長期夜班影響健康。</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card shadow mb-4">
+                            <div class="card-header py-3 bg-white">
+                                <h6 class="m-0 font-weight-bold text-primary"><i class="fas fa-users"></i> 每日人力需求 (低於此數將扣分/警告)</h6>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered text-center mb-0" style="font-size: 0.9rem;">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>班別</th>
+                                                <th>日</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="staff-req-tbody">
+                                            <tr><td colspan="8" class="text-muted p-3">請先選擇單位以載入班別設定</td></tr>
+                                        </tbody>
                                     </table>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="tab-pane fade" id="tab-constraints">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="card shadow mb-4 border-left-danger h-100">
-                                        <div class="card-header py-3 bg-white"><h6 class="m-0 fw-bold text-danger"><i class="fas fa-gavel"></i> 勞基法與硬性規範</h6></div>
-                                        <div class="card-body">
-                                            <div class="mb-4">
-                                                <div class="form-check form-switch mb-2">
-                                                    <input class="form-check-input" type="checkbox" id="rule-min-interval-11">
-                                                    <label class="form-check-label fw-bold" for="rule-min-interval-11">班與班間隔至少 11 小時</label>
-                                                </div>
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label fw-bold">一週內班別種類上限</label>
-                                                <select class="form-select" id="rule-max-shift-types">
-                                                    <option value="99">不限制</option>
-                                                    <option value="2">最多 2 種</option>
-                                                    <option value="1">僅限 1 種</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="card shadow mb-4 border-left-info h-100">
-                                        <div class="card-header py-3 bg-white"><h6 class="m-0 fw-bold text-info"><i class="fas fa-sliders-h"></i> 單位排班原則</h6></div>
-                                        <div class="card-body">
-                                            <div class="mb-4">
-                                                <div class="form-check form-switch mb-2">
-                                                    <input class="form-check-input" type="checkbox" id="rule-pre-night-off">
-                                                    <label class="form-check-label fw-bold" for="rule-pre-night-off">排大夜前一天須為 N 或 OFF</label>
-                                                </div>
-                                            </div>
-                                            <div class="row g-3">
-                                                <div class="col-md-6"><label class="fw-bold">同種班最少連續</label><input type="number" class="form-control" id="rule-min-consecutive" value="2"></div>
-                                                <div class="col-md-6"><label class="fw-bold">夜班最多連續</label><input type="number" class="form-control" id="rule-max-night-consecutive" value="4"></div>
-                                                <div class="col-12"><label class="fw-bold">最大連續上班天數</label><input type="number" class="form-control" id="rule-max-work-days" value="6"></div>
-                                            </div>
-                                        </div>
-                                    </div>
+                                <div class="p-2 small text-muted text-end">
+                                    數字為「該班別最少所需人數」。
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        <div class="tab-pane fade" id="tab-scoring">
-                            <div class="card shadow mb-4">
-                                <div class="card-header py-3 bg-white d-flex justify-content-between align-items-center">
-                                    <h6 class="m-0 fw-bold text-success">評分權重與標準配置</h6>
-                                    <div>總權重: <span id="total-weight-display" class="badge bg-secondary fs-6">100%</span></div>
+                    <div class="col-lg-6">
+                        <div class="card shadow mb-4">
+                            <div class="card-header py-3 bg-white">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="m-0 font-weight-bold text-success"><i class="fas fa-balance-scale"></i> AI 評分權重 (總分 100)</h6>
+                                    <span id="total-weight-display" class="badge bg-secondary">總和: 0</span>
                                 </div>
-                                <div class="card-body">
-                                    <div class="alert alert-info small mb-3"><i class="fas fa-info-circle"></i> 設定後請記得點擊右上角「儲存設定」，這些設定將影響 AI 排班與分數計算。</div>
-                                    <div class="row g-3" id="scoring-config-container"></div>
-                                </div>
+                            </div>
+                            <div class="card-body" id="scoring-weights-container">
+                                <div class="text-center p-3">載入中...</div>
                             </div>
                         </div>
                     </div>
@@ -111,315 +117,228 @@ export class RuleSettings {
                 <div class="modal-dialog">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">編輯評分標準</h5>
+                            <h5 class="modal-title fw-bold">設定階級評分參數</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
-                        <div class="modal-body">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <span id="modal-sub-label" class="fw-bold text-primary"></span>
-                                <button class="btn btn-sm btn-outline-warning" onclick="window.routerPage.resetTiersToDefault()">
-                                    <i class="fas fa-undo"></i> 恢復預設
-                                </button>
+                        <div class="modal-body" id="tiers-modal-body">
                             </div>
-                            
-                            <div id="modal-exclude-batch-wrapper" class="mb-3 p-2 bg-light rounded border d-none">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="modal-exclude-batch-input">
-                                    <label class="form-check-label fw-bold" for="modal-exclude-batch-input">包班者不計 (Exclude Batch)</label>
-                                </div>
-                                <small class="text-muted">開啟後，計算此指標時將排除包班人員 (避免拉低平均)。</small>
-                            </div>
-
-                            <table class="table table-sm table-bordered text-center align-middle">
-                                <thead class="table-light"><tr><th>數值 (≤)</th><th>得分</th><th>評語</th><th>操作</th></tr></thead>
-                                <tbody id="tiers-tbody"></tbody>
-                            </table>
-                            <button class="btn btn-sm btn-outline-success w-100" onclick="window.routerPage.addTierRow()">+ 新增階梯</button>
-                        </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                            <button type="button" class="btn btn-primary" onclick="window.routerPage.saveTiers()">確認暫存</button>
+                            <button type="button" class="btn btn-primary" onclick="window.routerPage.saveTiers()">確定</button>
                         </div>
                     </div>
                 </div>
             </div>
         `;
-    }
-
-    renderRow(shift, label) {
-        let html = `<tr><td class="fw-bold bg-light">${label}</td>`;
-        [1, 2, 3, 4, 5, 6, 0].forEach(d => html += `<td><input type="number" class="form-control form-control-sm text-center req-input" data-shift="${shift}" data-day="${d}" value="0" min="0"></td>`);
-        return html + '</tr>';
-    }
-
-    renderCategoryCard(key, category) {
-        if (!category) return ''; // 防呆
-        let subsHtml = '';
-        if (category.subs) {
-            Object.entries(category.subs).forEach(([subKey, sub]) => {
-                subsHtml += `
-                    <div class="d-flex justify-content-between align-items-center mb-2 ps-3 border-start border-3 border-light py-1">
-                        <div class="d-flex flex-column" style="width: 55%;">
-                            <div class="d-flex align-items-center">
-                                <div class="form-check form-switch me-2">
-                                    <input class="form-check-input sub-enable" type="checkbox" id="sub-enable-${key}-${subKey}" 
-                                           data-cat="${key}" data-sub="${subKey}" ${sub.enabled ? 'checked' : ''}>
-                                </div>
-                                <div class="text-truncate small fw-bold" title="${sub.label}">${sub.label}</div>
-                                <i class="fas fa-question-circle text-muted ms-2 cursor-pointer" 
-                                   data-bs-toggle="tooltip" data-bs-placement="top" title="${sub.desc || '無說明'}"></i>
-                            </div>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:0.75rem" 
-                                    onclick="window.routerPage.openTiersModal('${key}', '${subKey}')">
-                                <i class="fas fa-cog"></i> 標準
-                            </button>
-                            <div class="input-group input-group-sm" style="width: 80px;">
-                                <input type="number" class="form-control sub-weight text-center px-1" 
-                                       id="sub-weight-${key}-${subKey}" data-cat="${key}" data-sub="${subKey}"
-                                       value="${sub.weight}" min="0" max="100">
-                                <span class="input-group-text px-1">%</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-        }
-
-        return `
-            <div class="col-md-6 col-lg-6">
-                <div class="card h-100 border-left-${this.getColor(key)}">
-                    <div class="card-body p-3">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="m-0 fw-bold text-dark">${category.label}</h6>
-                            <span class="badge bg-light text-dark border" id="cat-total-${key}">0%</span>
-                        </div>
-                        ${subsHtml}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    getColor(key) {
-        const map = { fairness: 'primary', satisfaction: 'info', fatigue: 'warning', efficiency: 'success', cost: 'danger' };
-        return map[key] || 'secondary';
     }
 
     async afterRender() {
-        window.routerPage = this; 
+        // 設定 Modal 實例
         this.tiersModal = new bootstrap.Modal(document.getElementById('tiers-modal'));
+        // 綁定 window.routerPage 方便 Modal 呼叫
+        window.routerPage = this;
 
-        [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(el => new bootstrap.Tooltip(el));
-
+        const user = authService.getProfile();
+        const isAdmin = user.role === 'system_admin' || user.originalRole === 'system_admin';
         const unitSelect = document.getElementById('rule-unit-select');
-        let units = await UnitService.getAllUnits();
         
-        if(units.length > 0) {
-            unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
-            unitSelect.addEventListener('change', (e) => this.loadRules(e.target.value));
-            this.loadRules(units[0].unitId);
+        // 1. 載入單位列表
+        let units = [];
+        if (isAdmin) {
+            units = await UnitService.getAllUnits();
         } else {
-             unitSelect.innerHTML = '<option value="">無權限</option>';
-             unitSelect.disabled = true;
+            units = await UnitService.getUnitsByManager(user.uid);
+            if(units.length === 0 && user.unitId) {
+                const u = await UnitService.getUnitById(user.unitId);
+                if(u) units.push(u);
+            }
+        }
+
+        if (units.length === 0) {
+            unitSelect.innerHTML = '<option value="">無權限</option>';
+            unitSelect.disabled = true;
+        } else {
+            unitSelect.innerHTML = `<option value="" disabled selected>請選擇單位</option>` + 
+                units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
+            
+            unitSelect.addEventListener('change', (e) => this.loadRules(e.target.value));
+            
+            // 自動選擇第一個
+            if(units.length > 0) {
+                unitSelect.value = units[0].unitId;
+                this.loadRules(units[0].unitId);
+            }
         }
 
         document.getElementById('btn-save-rules').addEventListener('click', () => this.saveRules());
         
-        document.getElementById('rule-content').addEventListener('input', (e) => {
-            if (e.target.classList.contains('sub-weight') || e.target.classList.contains('sub-enable')) {
-                this.updateTotalWeightDisplay();
-            }
+        // 綁定權重輸入變更事件，即時計算總分
+        document.getElementById('scoring-weights-container').addEventListener('input', (e) => {
+           if(e.target.classList.contains('weight-input')) {
+               this.updateTotalWeightDisplay();
+           } 
         });
     }
 
-    async loadRules(uid) {
-        if(!uid) return;
-        this.targetUnitId = uid;
-        const unit = await UnitService.getUnitById(uid);
+    async loadRules(unitId) {
+        this.targetUnitId = unitId;
+        const unit = await UnitService.getUnitById(unitId);
         if (!unit) return;
 
-        // 1. Scoring Config (載入與合併)
-        // 這裡使用 ScoringService 取得預設結構，確保設定檔的完整性
-        let defaultConfig;
-        try {
-             defaultConfig = ScoringService.getDefaultConfig();
-        } catch(e) {
-            console.error("Error getting default config:", e);
-            defaultConfig = {}; 
-        }
+        // 1. 載入硬性規則
+        const rules = unit.rules || {};
+        document.getElementById('rule-min-interval-11').checked = !!rules.minInterval11;
+        document.getElementById('rule-max-shift-types').value = rules.maxShiftTypes || 2;
+        document.getElementById('rule-pre-night-off').checked = !!rules.preNightOff;
+        document.getElementById('rule-min-consecutive').value = rules.minConsecutive || 1;
+        document.getElementById('rule-max-work-days').value = rules.maxWorkDays || 6;
+        document.getElementById('rule-max-night-consecutive').value = rules.maxNightConsecutive || 4;
 
+        // 2. ✅ 修正：動態生成人力需求表格 (來自班別設定)
+        const shifts = unit.settings?.shifts || [{code:'D', name:'白班'}, {code:'E', name:'小夜'}, {code:'N', name:'大夜'}];
+        const reqs = unit.staffRequirements || {};
+        
+        let reqHtml = '';
+        shifts.forEach(shift => {
+            const code = shift.code;
+            const name = shift.name;
+            const rowReq = reqs[code] || {}; // {0:2, 1:3...}
+            
+            reqHtml += `<tr><td class="fw-bold">${name} (${code})</td>`;
+            
+            // 0=Sun ... 6=Sat
+            for(let d=0; d<=6; d++) {
+                const val = rowReq[d] || 0;
+                reqHtml += `<td><input type="number" class="form-control form-control-sm text-center req-input p-0" 
+                              style="height: 24px;" min="0" value="${val}" data-shift="${code}" data-day="${d}"></td>`;
+            }
+            reqHtml += `</tr>`;
+        });
+        document.getElementById('staff-req-tbody').innerHTML = reqHtml;
+
+
+        // 3. 載入評分權重 (使用 ScoringService 的 config 結構)
+        // 這裡我們將 UI 的顯示與 scoringConfig 結合
+        // 如果單位有儲存自訂權重，則覆蓋預設值
+        const defaultConfig = ScoringService.getDefaultConfig();
         const savedConfig = unit.scoringConfig || {};
+        
+        // 合併設定
         this.currentConfig = JSON.parse(JSON.stringify(defaultConfig));
         
-        // ✅ 修正點：合併邏輯加入防呆檢查
-        if (this.currentConfig && savedConfig) {
-            Object.keys(savedConfig).forEach(catKey => {
-                // 檢查 currentConfig 是否有對應的 category 及 subs
-                if(this.currentConfig[catKey] && this.currentConfig[catKey].subs && savedConfig[catKey].subs) {
-                    Object.keys(savedConfig[catKey].subs).forEach(subKey => {
-                        // 檢查 currentConfig 是否有對應的 sub-item
-                        if(this.currentConfig[catKey].subs[subKey]) {
-                            const target = this.currentConfig[catKey].subs[subKey];
-                            const source = savedConfig[catKey].subs[subKey];
-                            
-                            if (source) {
-                                if (source.enabled !== undefined) target.enabled = source.enabled;
-                                if (source.weight !== undefined) target.weight = source.weight;
-                                if (source.tiers) target.tiers = source.tiers;
-                                if (source.excludeBatch !== undefined) target.excludeBatch = source.excludeBatch;
-                            }
-                        }
-                    });
-                }
-            });
-        }
-
-        // 渲染 UI
-        const container = document.getElementById('scoring-config-container');
-        if (container) {
-            container.innerHTML = '';
-            ['fairness', 'satisfaction', 'fatigue', 'efficiency', 'cost'].forEach(key => {
-                if (this.currentConfig[key]) {
-                    container.innerHTML += this.renderCategoryCard(key, this.currentConfig[key]);
-                }
-            });
-            
-            [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(el => new bootstrap.Tooltip(el));
-            this.updateTotalWeightDisplay();
-        }
-
-        // 2. 載入 Constraints
-        const rules = unit.rules || {};
-        const setChecked = (id, val) => { const el = document.getElementById(id); if(el) el.checked = val; };
-        const setValue = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
-
-        setChecked('rule-min-interval-11', rules.minInterval11 !== false);
-        setValue('rule-max-shift-types', rules.maxShiftTypes || 99);
-        setChecked('rule-pre-night-off', rules.preNightOff !== false);
-        setValue('rule-min-consecutive', rules.minConsecutive || 2);
-        setValue('rule-max-night-consecutive', rules.maxNightConsecutive || 4);
-        setValue('rule-max-work-days', rules.maxWorkDays || 6);
-
-        // 3. 載入 Staff Req
-        const reqs = unit.staffRequirements || {};
-        document.querySelectorAll('.req-input').forEach(input => {
-            const shift = input.dataset.shift;
-            const day = input.dataset.day;
-            input.value = reqs[shift]?.[day] || 0;
+        // 遞迴合併 savedConfig 到 currentConfig
+        Object.keys(savedConfig).forEach(catKey => {
+           if(this.currentConfig[catKey]) {
+               if(savedConfig[catKey].weight !== undefined) this.currentConfig[catKey].weight = savedConfig[catKey].weight;
+               // 合併 items
+               if(savedConfig[catKey].items) {
+                   savedConfig[catKey].items.forEach(savedItem => {
+                       const targetItem = this.currentConfig[catKey].items.find(i => i.key === savedItem.key);
+                       if(targetItem) {
+                           targetItem.defaultWeight = savedItem.defaultWeight;
+                           // 其他屬性如 tiers
+                           if(savedItem.tiers) targetItem.tiers = savedItem.tiers;
+                           if(savedItem.excludeBatch !== undefined) targetItem.excludeBatch = savedItem.excludeBatch;
+                       }
+                   });
+               }
+           } 
         });
 
-        const content = document.getElementById('rule-content');
-        if(content) content.style.display = 'block';
+        this.renderScoringUI();
+        this.updateTotalWeightDisplay();
+    }
+
+    renderScoringUI() {
+        const container = document.getElementById('scoring-weights-container');
+        let html = '';
+
+        Object.keys(this.currentConfig).forEach(catKey => {
+            const cat = this.currentConfig[catKey];
+            html += `
+                <div class="mb-4 border-bottom pb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="fw-bold text-dark">${cat.label} (類別權重)</label>
+                        <input type="number" class="form-control form-control-sm w-25 weight-input category-weight" 
+                               data-cat="${catKey}" value="${cat.weight}" min="0" max="100">
+                    </div>
+                    
+                    <div class="ps-3 border-start border-3">
+                        ${cat.items.map((item, idx) => `
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small fw-bold">${item.label}</span>
+                                    <div class="d-flex gap-2">
+                                        ${item.key === 'seniority' ? 
+                                            `<button class="btn btn-sm btn-outline-info py-0" style="font-size:0.7rem" 
+                                              onclick="window.routerPage.openTiersModal('${catKey}', ${idx})">設定階級參數</button>` : ''}
+                                        <input type="number" class="form-control form-control-sm w-25 item-weight" 
+                                               data-cat="${catKey}" data-idx="${idx}" value="${item.defaultWeight}">
+                                    </div>
+                                </div>
+                                <div class="form-text small mt-0" style="font-size: 0.75rem;">${item.desc}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
     }
 
     updateTotalWeightDisplay() {
-        let grandTotal = 0;
-        const categories = ['fairness', 'satisfaction', 'fatigue', 'efficiency', 'cost'];
-        categories.forEach(key => {
-            if (!this.currentConfig[key]) return; // 防呆
-            
-            let catTotal = 0;
-            document.querySelectorAll(`.sub-weight[data-cat="${key}"]`).forEach(input => {
-                const subKey = input.dataset.sub;
-                const enabled = document.getElementById(`sub-enable-${key}-${subKey}`).checked;
-                
-                if (enabled) {
-                    const val = parseInt(input.value) || 0;
-                    catTotal += val;
-                    if(this.currentConfig[key].subs[subKey]) {
-                        this.currentConfig[key].subs[subKey].weight = val;
-                        this.currentConfig[key].subs[subKey].enabled = enabled;
-                    }
-                } else {
-                     if(this.currentConfig[key].subs[subKey]) {
-                        this.currentConfig[key].subs[subKey].enabled = false;
-                    }
-                }
-            });
-            const catTotalEl = document.getElementById(`cat-total-${key}`);
-            if(catTotalEl) catTotalEl.textContent = catTotal + '%';
-            grandTotal += catTotal;
+        let total = 0;
+        document.querySelectorAll('.category-weight').forEach(input => {
+            total += parseInt(input.value) || 0;
         });
-        const totalEl = document.getElementById('total-weight-display');
-        if(totalEl) {
-            totalEl.textContent = grandTotal + '%';
-            totalEl.className = `badge fs-6 ${grandTotal === 100 ? 'bg-success' : 'bg-warning text-dark'}`;
-        }
+        const badge = document.getElementById('total-weight-display');
+        badge.textContent = `總和: ${total}`;
+        badge.className = `badge ${total === 100 ? 'bg-success' : 'bg-warning text-dark'}`;
     }
-    
-    openTiersModal(catKey, subKey) {
-        this.activeModalSubKey = { cat: catKey, sub: subKey };
-        const subConfig = this.currentConfig[catKey].subs[subKey];
-        document.getElementById('modal-sub-label').textContent = subConfig.label;
 
-        const excludeWrapper = document.getElementById('modal-exclude-batch-wrapper');
-        const excludeInput = document.getElementById('modal-exclude-batch-input');
+    openTiersModal(catKey, itemIdx) {
+        this.activeModalSubKey = { catKey, itemIdx };
+        const item = this.currentConfig[catKey].items[itemIdx];
+        const body = document.getElementById('tiers-modal-body');
         
-        if (subConfig.excludeBatch !== undefined) {
-            excludeWrapper.classList.remove('d-none');
-            excludeInput.checked = subConfig.excludeBatch;
-        } else {
-            excludeWrapper.classList.add('d-none');
-        }
+        let tiersHtml = '';
+        const tiers = item.tiers || { N0: 0, N1: 10, N2: 20, N3: 30, N4: 40 }; // 預設值
+        
+        Object.keys(tiers).forEach(tier => {
+            tiersHtml += `
+                <div class="input-group input-group-sm mb-2">
+                    <span class="input-group-text">${tier}</span>
+                    <input type="number" class="form-control tier-input" data-tier="${tier}" value="${tiers[tier]}">
+                </div>
+            `;
+        });
+        
+        // 額外選項：是否排除包班者
+        const excludeChecked = item.excludeBatch ? 'checked' : '';
+        tiersHtml += `
+            <div class="form-check mt-3 border-top pt-2">
+                <input class="form-check-input" type="checkbox" id="tier-exclude-batch" ${excludeChecked}>
+                <label class="form-check-label">包班者不計入此評分 (通常用於資深包班)</label>
+            </div>
+        `;
 
-        const tbody = document.getElementById('tiers-tbody');
-        tbody.innerHTML = '';
-        const tiers = subConfig.tiers || [];
-        tiers.forEach(t => this.addTierRow(t));
+        body.innerHTML = tiersHtml;
         this.tiersModal.show();
     }
 
-    addTierRow(data = { limit: 0, score: 0, label: '優' }) {
-        const tbody = document.getElementById('tiers-tbody');
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td><input type="number" class="form-control form-control-sm text-center tier-limit" value="${data.limit}" step="0.1"></td>
-            <td><input type="number" class="form-control form-control-sm text-center tier-score" value="${data.score}"></td>
-            <td><input type="text" class="form-control form-control-sm tier-label" value="${data.label}"></td>
-            <td><button class="btn btn-sm btn-outline-danger border-0" onclick="this.closest('tr').remove()"><i class="fas fa-times"></i></button></td>
-        `;
-        tbody.appendChild(tr);
-    }
-
-    resetTiersToDefault() {
-        if (!confirm("確定要恢復此項目的預設評分標準嗎？")) return;
-        const { cat, sub } = this.activeModalSubKey;
-        const defaultConfig = ScoringService.getDefaultConfig();
-        const defaultTiers = defaultConfig[cat].subs[sub].tiers;
-        
-        const tbody = document.getElementById('tiers-tbody');
-        tbody.innerHTML = '';
-        defaultTiers.forEach(t => this.addTierRow(t));
-
-        const excludeInput = document.getElementById('modal-exclude-batch-input');
-        if (defaultConfig[cat].subs[sub].excludeBatch !== undefined) {
-            excludeInput.checked = defaultConfig[cat].subs[sub].excludeBatch;
-        }
-    }
-
     saveTiers() {
-        if (!this.activeModalSubKey) return;
-        const { cat, sub } = this.activeModalSubKey;
+        const { catKey, itemIdx } = this.activeModalSubKey;
+        const item = this.currentConfig[catKey].items[itemIdx];
         
-        const rows = document.querySelectorAll('#tiers-tbody tr');
-        const newTiers = [];
-        rows.forEach(tr => {
-            newTiers.push({
-                limit: parseFloat(tr.querySelector('.tier-limit').value) || 0,
-                score: parseInt(tr.querySelector('.tier-score').value) || 0,
-                label: tr.querySelector('.tier-label').value.trim()
-            });
+        const newTiers = {};
+        document.querySelectorAll('.tier-input').forEach(input => {
+            newTiers[input.dataset.tier] = parseInt(input.value) || 0;
         });
-        newTiers.sort((a, b) => a.limit - b.limit);
-        this.currentConfig[cat].subs[sub].tiers = newTiers;
-
-        const excludeWrapper = document.getElementById('modal-exclude-batch-wrapper');
-        if (!excludeWrapper.classList.contains('d-none')) {
-            const isChecked = document.getElementById('modal-exclude-batch-input').checked;
-            this.currentConfig[cat].subs[sub].excludeBatch = isChecked;
-        }
+        item.tiers = newTiers;
+        
+        const isChecked = document.getElementById('tier-exclude-batch').checked;
+        item.excludeBatch = isChecked;
 
         this.tiersModal.hide();
     }
@@ -428,24 +347,44 @@ export class RuleSettings {
         const btn = document.getElementById('btn-save-rules');
         btn.disabled = true;
         try {
+            // 1. 收集 UI 上的 Config 變更回 this.currentConfig
+            document.querySelectorAll('.category-weight').forEach(input => {
+                this.currentConfig[input.dataset.cat].weight = parseInt(input.value) || 0;
+            });
+            document.querySelectorAll('.item-weight').forEach(input => {
+                const cat = input.dataset.cat;
+                const idx = parseInt(input.dataset.idx);
+                this.currentConfig[cat].items[idx].defaultWeight = parseInt(input.value) || 0;
+            });
+
             this.updateTotalWeightDisplay();
             
+            // 2. 收集硬性規則
             const rules = {
                 minInterval11: document.getElementById('rule-min-interval-11').checked,
-                maxShiftTypes: document.getElementById('rule-max-shift-types').value,
+                maxShiftTypes: parseInt(document.getElementById('rule-max-shift-types').value),
                 preNightOff: document.getElementById('rule-pre-night-off').checked,
                 minConsecutive: parseInt(document.getElementById('rule-min-consecutive').value),
                 maxNightConsecutive: parseInt(document.getElementById('rule-max-night-consecutive').value),
                 maxWorkDays: parseInt(document.getElementById('rule-max-work-days').value)
             };
 
-            const reqs = { D: {}, E: {}, N: {} };
+            // 3. 收集人力需求 (動態班別)
+            const reqs = {}; // { D: {0:2, 1:3}, E: {...} }
+            
+            // 先確保所有班別都有 key
             document.querySelectorAll('.req-input').forEach(input => {
                 const shift = input.dataset.shift;
-                const day = input.dataset.day;
+                if(!reqs[shift]) reqs[shift] = {};
+            });
+
+            document.querySelectorAll('.req-input').forEach(input => {
+                const shift = input.dataset.shift;
+                const day = parseInt(input.dataset.day);
                 reqs[shift][day] = parseInt(input.value) || 0;
             });
 
+            // 4. 寫入資料庫
             await UnitService.updateUnit(this.targetUnitId, { 
                 scoringConfig: this.currentConfig,
                 rules: rules,
