@@ -153,6 +153,7 @@ export class RuleSettings {
     }
 
     renderCategoryCard(key, category) {
+        if (!category) return ''; // 防呆
         let subsHtml = '';
         if (category.subs) {
             Object.entries(category.subs).forEach(([subKey, sub]) => {
@@ -219,6 +220,9 @@ export class RuleSettings {
             unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
             unitSelect.addEventListener('change', (e) => this.loadRules(e.target.value));
             this.loadRules(units[0].unitId);
+        } else {
+             unitSelect.innerHTML = '<option value="">無權限</option>';
+             unitSelect.disabled = true;
         }
 
         document.getElementById('btn-save-rules').addEventListener('click', () => this.saveRules());
@@ -238,44 +242,65 @@ export class RuleSettings {
 
         // 1. Scoring Config (載入與合併)
         // 這裡使用 ScoringService 取得預設結構，確保設定檔的完整性
-        const defaultConfig = ScoringService.getDefaultConfig();
+        let defaultConfig;
+        try {
+             defaultConfig = ScoringService.getDefaultConfig();
+        } catch(e) {
+            console.error("Error getting default config:", e);
+            defaultConfig = {}; 
+        }
+
         const savedConfig = unit.scoringConfig || {};
         this.currentConfig = JSON.parse(JSON.stringify(defaultConfig));
         
-        // 合併邏輯：保留預設結構，但覆蓋已儲存的值
-        Object.keys(savedConfig).forEach(catKey => {
-            if(this.currentConfig[catKey] && savedConfig[catKey].subs) {
-                Object.keys(savedConfig[catKey].subs).forEach(subKey => {
-                    if(this.currentConfig[catKey].subs[subKey]) {
-                        const target = this.currentConfig[catKey].subs[subKey];
-                        const source = savedConfig[catKey].subs[subKey];
-                        target.enabled = source.enabled;
-                        target.weight = source.weight;
-                        if(source.tiers) target.tiers = source.tiers;
-                        if(source.excludeBatch !== undefined) target.excludeBatch = source.excludeBatch;
-                    }
-                });
-            }
-        });
+        // ✅ 修正點：合併邏輯加入防呆檢查
+        if (this.currentConfig && savedConfig) {
+            Object.keys(savedConfig).forEach(catKey => {
+                // 檢查 currentConfig 是否有對應的 category 及 subs
+                if(this.currentConfig[catKey] && this.currentConfig[catKey].subs && savedConfig[catKey].subs) {
+                    Object.keys(savedConfig[catKey].subs).forEach(subKey => {
+                        // 檢查 currentConfig 是否有對應的 sub-item
+                        if(this.currentConfig[catKey].subs[subKey]) {
+                            const target = this.currentConfig[catKey].subs[subKey];
+                            const source = savedConfig[catKey].subs[subKey];
+                            
+                            if (source) {
+                                if (source.enabled !== undefined) target.enabled = source.enabled;
+                                if (source.weight !== undefined) target.weight = source.weight;
+                                if (source.tiers) target.tiers = source.tiers;
+                                if (source.excludeBatch !== undefined) target.excludeBatch = source.excludeBatch;
+                            }
+                        }
+                    });
+                }
+            });
+        }
 
         // 渲染 UI
         const container = document.getElementById('scoring-config-container');
-        container.innerHTML = '';
-        ['fairness', 'satisfaction', 'fatigue', 'efficiency', 'cost'].forEach(key => {
-            container.innerHTML += this.renderCategoryCard(key, this.currentConfig[key]);
-        });
-        
-        [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(el => new bootstrap.Tooltip(el));
-        this.updateTotalWeightDisplay();
+        if (container) {
+            container.innerHTML = '';
+            ['fairness', 'satisfaction', 'fatigue', 'efficiency', 'cost'].forEach(key => {
+                if (this.currentConfig[key]) {
+                    container.innerHTML += this.renderCategoryCard(key, this.currentConfig[key]);
+                }
+            });
+            
+            [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(el => new bootstrap.Tooltip(el));
+            this.updateTotalWeightDisplay();
+        }
 
         // 2. 載入 Constraints
         const rules = unit.rules || {};
-        document.getElementById('rule-min-interval-11').checked = rules.minInterval11 !== false;
-        document.getElementById('rule-max-shift-types').value = rules.maxShiftTypes || 99;
-        document.getElementById('rule-pre-night-off').checked = rules.preNightOff !== false;
-        document.getElementById('rule-min-consecutive').value = rules.minConsecutive || 2;
-        document.getElementById('rule-max-night-consecutive').value = rules.maxNightConsecutive || 4;
-        document.getElementById('rule-max-work-days').value = rules.maxWorkDays || 6;
+        const setChecked = (id, val) => { const el = document.getElementById(id); if(el) el.checked = val; };
+        const setValue = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
+
+        setChecked('rule-min-interval-11', rules.minInterval11 !== false);
+        setValue('rule-max-shift-types', rules.maxShiftTypes || 99);
+        setChecked('rule-pre-night-off', rules.preNightOff !== false);
+        setValue('rule-min-consecutive', rules.minConsecutive || 2);
+        setValue('rule-max-night-consecutive', rules.maxNightConsecutive || 4);
+        setValue('rule-max-work-days', rules.maxWorkDays || 6);
 
         // 3. 載入 Staff Req
         const reqs = unit.staffRequirements || {};
@@ -285,13 +310,16 @@ export class RuleSettings {
             input.value = reqs[shift]?.[day] || 0;
         });
 
-        document.getElementById('rule-content').style.display = 'block';
+        const content = document.getElementById('rule-content');
+        if(content) content.style.display = 'block';
     }
 
     updateTotalWeightDisplay() {
         let grandTotal = 0;
         const categories = ['fairness', 'satisfaction', 'fatigue', 'efficiency', 'cost'];
         categories.forEach(key => {
+            if (!this.currentConfig[key]) return; // 防呆
+            
             let catTotal = 0;
             document.querySelectorAll(`.sub-weight[data-cat="${key}"]`).forEach(input => {
                 const subKey = input.dataset.sub;
@@ -310,12 +338,15 @@ export class RuleSettings {
                     }
                 }
             });
-            document.getElementById(`cat-total-${key}`).textContent = catTotal + '%';
+            const catTotalEl = document.getElementById(`cat-total-${key}`);
+            if(catTotalEl) catTotalEl.textContent = catTotal + '%';
             grandTotal += catTotal;
         });
         const totalEl = document.getElementById('total-weight-display');
-        totalEl.textContent = grandTotal + '%';
-        totalEl.className = `badge fs-6 ${grandTotal === 100 ? 'bg-success' : 'bg-warning text-dark'}`;
+        if(totalEl) {
+            totalEl.textContent = grandTotal + '%';
+            totalEl.className = `badge fs-6 ${grandTotal === 100 ? 'bg-success' : 'bg-warning text-dark'}`;
+        }
     }
     
     openTiersModal(catKey, subKey) {
