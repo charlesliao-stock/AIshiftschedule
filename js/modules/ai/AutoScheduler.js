@@ -521,40 +521,46 @@ export class AutoScheduler {
                 console.log("    ✅ OFF 平衡度已達標");
                 break;
             }
+                    const sorted = [...offStats].sort((a, b) => a.off - b.off);
+            const tooFewOff = sorted.slice(0, Math.ceil(sorted.length * 0.4)); // 休假太少 (Overworked)
+            const tooManyOff = sorted.slice(-Math.ceil(sorted.length * 0.4)).reverse(); // 休假太多 (Underworked)
             
-            const sorted = [...offStats].sort((a, b) => a.off - b.off);
-            const overworked = sorted.slice(0, Math.ceil(sorted.length * 0.4));
-            const underworked = sorted.slice(-Math.ceil(sorted.length * 0.4)).reverse();
-            
-            for (const busyUser of overworked) {
+            // 策略：將休假太多者的 OFF 換給休假太少者的 上班班次
+            for (const fewOffUser of tooFewOff) {
                 let swappedThisUser = false;
                 
+                // 遍歷休假太少者的所有上班日
                 for (let d = 1; d <= daysInMonth && !swappedThisUser; d++) {
-                    const shift = assignments[busyUser.uid][d];
+                    const shift = assignments[fewOffUser.uid][d];
                     
-                    if (!['D','E','N'].includes(shift) || this.isLocked(context, busyUser.uid, d)) {
+                    // 必須是上班班次且未鎖定
+                    if (!['D','E','N'].includes(shift) || this.isLocked(context, fewOffUser.uid, d)) {
                         continue;
                     }
                     
-                    for (const freeUser of underworked) {
-                        if (busyUser.uid === freeUser.uid) continue;
+                    for (const manyOffUser of tooManyOff) {
+                        if (fewOffUser.uid === manyOffUser.uid) continue;
                         
-                        if (assignments[freeUser.uid][d] !== 'OFF' || this.isLocked(context, freeUser.uid, d)) {
+                        // 檢查休假太多者這天是否為 OFF 且未鎖定
+                        if (assignments[manyOffUser.uid][d] !== 'OFF' || this.isLocked(context, manyOffUser.uid, d)) {
                             continue;
                         }
                         
-                        if (this.canSwap(context, busyUser.uid, freeUser.uid, d, shift)) {
-                            this.assign(context, busyUser.uid, d, 'OFF');
-                            this.assign(context, freeUser.uid, d, shift);
+                        // 檢查交換後的班表是否合法 (manyOffUser 換成 shift, fewOffUser 換成 OFF)
+                        // 由於 fewOffUser 換成 OFF 必然合法，只需檢查 manyOffUser 換成 shift 是否合法
+                        if (this.canSwap(context, manyOffUser.uid, fewOffUser.uid, d, shift)) {
+                            // 執行交換
+                            this.assign(context, fewOffUser.uid, d, 'OFF'); // 休假太少者換成 OFF
+                            this.assign(context, manyOffUser.uid, d, shift); // 休假太多者換成 shift
                             swapCount++;
                             swappedThisUser = true;
                             break;
                         }
                     }
                 }
-            }
-            
-            console.log(`    本輪交換次數: ${swapCount}`);
+                // 每次迭代只交換一次，以確保平衡度計算準確
+                if (swappedThisUser) break; 
+            }`);
             
             if (swapCount === 0) {
                 console.log("    ⚠️ 無法進一步優化 OFF");
