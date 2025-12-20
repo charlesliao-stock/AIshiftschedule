@@ -5,7 +5,7 @@ import { PreScheduleService } from "../../services/firebase/PreScheduleService.j
 import { ScoringService } from "../../services/ScoringService.js";
 import { RuleEngine } from "../ai/RuleEngine.js";
 import { AutoScheduler } from "../ai/AutoScheduler.js";
-import { SchedulePageTemplate } from "./SchedulePageTemplate.js"; // 確保引入 Template
+import { SchedulePageTemplate } from "./templates/SchedulePageTemplate.js"; // 確保引入 Template
 
 export class SchedulePage {
     constructor() {
