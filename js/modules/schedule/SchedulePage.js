@@ -3,9 +3,13 @@ import { userService } from "../../services/firebase/UserService.js";
 import { ScheduleService } from "../../services/firebase/ScheduleService.js";
 import { PreScheduleService } from "../../services/firebase/PreScheduleService.js";
 import { ScoringService } from "../../services/ScoringService.js";
+
+// 引用 AI 模組
 import { RuleEngine } from "../ai/RuleEngine.js";
 import { AutoScheduler } from "../ai/AutoScheduler.js";
-import { SchedulePageTemplate } from "./templates/SchedulePageTemplate.js"; // 確保引入 Template
+
+// 引用 Template (用於 AI 版本預覽)
+import { SchedulePageTemplate } from "./template/SchedulePageTemplate.js";
 
 export class SchedulePage {
     constructor() {
@@ -17,20 +21,19 @@ export class SchedulePage {
             scoreResult: null,
             sortKey: 'staffId', 
             sortAsc: true,
-            preSchedule: null,
-            // 新增上月相關狀態
+            preSchedule: null, // 儲存預班資料
+            
+            // 新增：上月相關資料
             previousMonthSchedule: null,
             prevMonthInfo: null
         };
-        // ... (其餘 constructor 保持不變)
         this.versionsModal = null; 
         this.scoreModal = null;
         this.settingsModal = null; 
         this.generatedVersions = [];
+        
         this.handleGlobalClick = this.handleGlobalClick.bind(this);
     }
-
-    // ... (handleGlobalClick, cleanup, render, afterRender 保持不變) ...
 
     handleGlobalClick(e) {
         // 保留供未來擴充全域點擊事件
@@ -43,11 +46,9 @@ export class SchedulePage {
     }
 
     async render() {
-        // ... (保持原有的 render HTML/CSS 不變) ...
-        // 建議在 <style> 中加入針對唯讀格子的樣式
         const style = `
             <style>
-                /* ... 原本的 CSS ... */
+                /* 強制表格內容置中 (除姓名外) */
                 .schedule-grid th, .schedule-grid td { 
                     vertical-align: middle; 
                     white-space: nowrap; 
@@ -56,37 +57,163 @@ export class SchedulePage {
                     border-color: #dee2e6;
                     text-align: center; 
                 }
-                /* ... 其他 CSS ... */
                 
-                /* 新增：上月唯讀格子樣式 */
-                .prev-month-cell {
-                    background-color: #e9ecef !important;
-                    color: #6c757d;
-                    opacity: 0.8;
+                .schedule-table-wrapper { position: relative; height: calc(100vh - 220px); width: 100%; overflow: auto; border: 1px solid #ddd; }
+                
+                /* 固定欄位設定 */
+                .sticky-col { position: sticky; z-index: 10; background-color: #fff; }
+                .first-col { left: 0; z-index: 11; border-right: 2px solid #ccc !important; width: 60px; }
+                .second-col { left: 60px; z-index: 11; width: 80px; text-align: center; } 
+                
+                /* 備註欄寬度與樣式調整 */
+                .third-col { 
+                    left: 140px; 
+                    z-index: 11; 
+                    border-right: 2px solid #999 !important; 
+                    width: 100px; 
+                    max-width: 100px; 
+                    overflow: hidden; 
+                    white-space: normal; 
+                    font-size: 0.7rem; 
+                    vertical-align: middle; 
+                    line-height: 1.1; 
+                    text-align: left; 
+                    padding: 2px !important;
                 }
                 
-                /* 覆蓋：移除原本週末的強制背景色，只保留紅字 */
+                /* 右側統計固定欄 */
+                .right-col-1 { right: 0; z-index: 11; border-left: 2px solid #ccc !important; width: 45px; background-color: #fff; } 
+                .right-col-2 { right: 45px; z-index: 11; width: 45px; background-color: #fff; }
+                .right-col-3 { right: 90px; z-index: 11; width: 45px; background-color: #fff; }
+                .right-col-4 { right: 135px; z-index: 11; border-left: 2px solid #999 !important; width: 45px; background-color: #fff; }
+                
+                thead .sticky-col { z-index: 15 !important; background-color: #f8f9fa; }
+                
+                /* 樣式微調 */
+                .bg-light-gray { background-color: #f8f9fa !important; color: #aaa; }
+                .shift-input { border: none; width: 100%; height: 100%; text-align: center; background: transparent; font-weight: 500; }
+                .shift-input:focus { background-color: #e8f0fe !important; outline: 2px solid #0d6efd; z-index: 5; position: relative; }
+                
+                .cursor-pointer { cursor: pointer; }
+                .sort-icon { font-size: 0.7rem; margin-left: 2px; color: #666; }
+                .stats-row td { background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #666 !important; }
+
+                /* 預班標記 */
+                .wish-cell { position: relative; }
+                .wish-marker { position: absolute; top: 1px; right: 1px; font-size: 0.6rem; color: #dc3545; font-weight: bold; z-index: 4; pointer-events: none; }
+                
+                /* 假日紅字 */
                 .text-danger { color: #dc3545 !important; }
             </style>
         `;
-        // ... (回傳原本的 HTML結構) ...
-        
-        // 為了節省篇幅，這裡省略重複的 HTML string，請保持您原本的 render() 內容
-        // 只要確保 CSS 部分有被應用即可
-        return super.render ? super.render() : this._originalRender(); // 假設您有父類別或直接貼上原本代碼
-    }
-    
-    // 輔助函式：為了不破壞您原本的 render，請將原本的 render 函式內容貼回，
-    // 或直接使用您原本的 render 方法，只需確認 CSS 沒有衝突。
-    _originalRender() {
-        // (請將您原本的 render() 內容放在這，或直接在原本的位置修改)
-        // 這裡僅示意，請使用您上傳的原始碼中的 render()
-        return `... (原始 HTML) ...`; 
+
+        const params = new URLSearchParams(window.location.hash.split('?')[1]);
+        this.state.currentUnitId = params.get('unitId');
+        this.state.year = parseInt(params.get('year'));
+        this.state.month = parseInt(params.get('month'));
+
+        if(!this.state.currentUnitId) return `<div class="alert alert-danger m-4">無效的參數。</div>`;
+
+        const modalHtml = `
+            <div class="modal fade" id="versions-modal" tabindex="-1">
+                <div class="modal-dialog modal-fullscreen">
+                    <div class="modal-content">
+                        <div class="modal-header bg-primary text-white">
+                            <h5 class="modal-title"><i class="fas fa-robot me-2"></i>AI 智慧排班結果</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body bg-light p-3" id="versions-modal-body"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal fade" id="score-modal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header bg-success text-white">
+                            <h5 class="modal-title"><i class="fas fa-star me-2"></i>排班品質評分細節</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="score-modal-body"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal fade" id="settings-modal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">規則與評分設定</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div id="rule-settings-container-modal"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        return `
+            ${style}
+            ${modalHtml}
+            <div class="container-fluid mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-3 p-3 bg-white shadow-sm rounded">
+                    <div class="d-flex align-items-center gap-3">
+                        <h4 class="text-gray-800 fw-bold mb-0"><i class="fas fa-calendar-alt"></i> <span id="schedule-title">載入中...</span></h4>
+                        <div id="score-display-card" class="d-flex align-items-center px-3 py-1 bg-light rounded border cursor-pointer" onclick="window.routerPage.openScoreModal()">
+                            <span class="text-muted me-2 small">評分</span>
+                            <h4 class="mb-0 fw-bold text-secondary" id="score-display">--</h4>
+                            <span class="ms-1 small">分</span>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button id="btn-settings" class="btn btn-outline-secondary" onclick="window.routerPage.openSettingsModal()">
+                            <i class="fas fa-cog"></i> 設定
+                        </button>
+                        <button id="btn-reset" class="btn btn-outline-danger" onclick="window.routerPage.resetToPreSchedule()">
+                            <i class="fas fa-undo"></i> 重置 (載入預班)
+                        </button>
+                        <button id="btn-ai-schedule" class="btn btn-primary" onclick="window.routerPage.openVersionsModal()">
+                            <i class="fas fa-robot"></i> AI 智慧排班
+                        </button>
+                        <button id="btn-save" class="btn btn-success" onclick="window.routerPage.saveSchedule()">
+                            <i class="fas fa-save"></i> 儲存排班
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="schedule-container" class="card shadow mb-4">
+                    <div class="card-body p-0">
+                        <div class="schedule-table-wrapper">
+                            <table class="table table-bordered schedule-grid mb-0">
+                                <thead id="schedule-thead"></thead>
+                                <tbody id="schedule-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
-    // ==========================================
-    // 1. 修改 loadData：獲取上個月資料
-    // ==========================================
+    async afterRender() {
+        window.routerPage = this; 
+        this.versionsModal = new bootstrap.Modal(document.getElementById('versions-modal'));
+        this.scoreModal = new bootstrap.Modal(document.getElementById('score-modal'));
+        
+        const settingsEl = document.getElementById('settings-modal');
+        if (settingsEl) {
+            this.settingsModal = new bootstrap.Modal(settingsEl);
+        }
+        
+        try {
+            await this.loadData();
+            this.renderSchedule();
+            this.attachEvents();
+        } catch (e) {
+            console.error("Page Load Error:", e);
+            document.getElementById('schedule-container').innerHTML = `<div class="alert alert-danger m-4">頁面載入失敗: ${e.message}</div>`;
+        }
+    }
+
     async loadData() {
         const { currentUnitId, year, month } = this.state;
         
@@ -102,7 +229,7 @@ export class SchedulePage {
         this.state.preSchedule = await PreScheduleService.getPreSchedule(currentUnitId, year, month);
         this.state.scheduleData = await ScheduleService.getSchedule(currentUnitId, year, month);
 
-        // 3. (新增) 載入上個月班表資料
+        // 3. 載入上個月排班資料 (用於顯示前 6 天)
         let prevYear = year;
         let prevMonth = month - 1;
         if (prevMonth === 0) {
@@ -122,7 +249,7 @@ export class SchedulePage {
                 displayDays: [] // 存放最後 6 天
             };
             
-            // 計算最後 6 天 (例如 25, 26, 27, 28, 29, 30)
+            // 生成最後 6 天的日期 (例如 25, 26, 27, 28, 29, 30)
             for (let i = 5; i >= 0; i--) {
                 this.state.prevMonthInfo.displayDays.push(prevDaysInMonth - i);
             }
@@ -132,7 +259,7 @@ export class SchedulePage {
             this.state.prevMonthInfo = null;
         }
 
-        // 4. 初始化本月班表 (如果不存在)
+        // 4. 初始化班表 (若無資料)
         if (!this.state.scheduleData) {
             if (!this.state.preSchedule) {
                 this.state.staffList = []; 
@@ -140,22 +267,25 @@ export class SchedulePage {
                     <div class="alert alert-warning m-5 text-center">
                         <h4><i class="fas fa-exclamation-triangle"></i> 無法建立排班表</h4>
                         <p class="mb-4">找不到 ${year}年${month}月 的預班表資料。</p>
+                        <p>排班作業必須基於「預班表」進行。請先至【預班管理】完成預班發布與確認。</p>
                         <a href="#/pre-schedule/manage" class="btn btn-primary">前往預班管理</a>
                     </div>`;
                 throw new Error("中止載入：無預班表");
             }
+
+            console.log("初始化排班表 (基於預班表)...");
             this.state.scheduleData = {
                 unitId: currentUnitId, year, month,
                 assignments: {},
                 logs: [],
-                version: 0
+                version: 0,
+                activeVersion: 0
             };
             this.performReset(false); 
         }
         
         this.state.daysInMonth = new Date(year, month, 0).getDate();
 
-        // 5. 處理人員名單
         let finalStaffList = [];
         const unitUsers = await userService.getUsersByUnit(currentUnitId);
         const userMap = {};
@@ -164,24 +294,30 @@ export class SchedulePage {
         if (this.state.preSchedule && this.state.preSchedule.staffIds) {
             const promises = this.state.preSchedule.staffIds.map(async (uid) => {
                 if (userMap[uid]) return userMap[uid];
-                try { return await userService.getUserData(uid); } catch (e) { return null; }
+                try {
+                    return await userService.getUserData(uid);
+                } catch (e) {
+                    return null;
+                }
             });
             const results = await Promise.all(promises);
             finalStaffList = results.filter(u => u !== null);
         } else {
             finalStaffList = unitUsers;
         }
+
         this.state.staffList = finalStaffList;
         
         const unitName = this.state.unitSettings.unitName || '未命名單位';
-        const titleEl = document.getElementById('schedule-title');
-        if(titleEl) titleEl.textContent = `${unitName} ${year}年${month}月`;
+        document.getElementById('schedule-title').textContent = `${unitName} ${year}年${month}月`;
     }
 
-    // ... (renderSchedule 保持不變，它會呼叫下方的 renderHeader 和 renderStaffRow) ...
     renderSchedule() {
         const { staffList, scheduleData, daysInMonth, unitSettings } = this.state;
-        if (!staffList || staffList.length === 0) return;
+        
+        if (!staffList || staffList.length === 0) {
+            return;
+        }
 
         const thead = document.getElementById('schedule-thead');
         if(thead) thead.innerHTML = this.renderHeader(daysInMonth);
@@ -191,14 +327,13 @@ export class SchedulePage {
             tbody.innerHTML = staffList.map(staff => 
                 this.renderStaffRow(staff, scheduleData.assignments[staff.uid] || {}, daysInMonth, unitSettings)
             ).join('');
+            
             tbody.innerHTML += this.renderStatsRow(daysInMonth, scheduleData.assignments, unitSettings);
         }
+
         this.calculateScore();
     }
 
-    // ==========================================
-    // 2. 修改 renderHeader：加入上月日期
-    // ==========================================
     renderHeader(daysInMonth) {
         const { prevMonthInfo } = this.state;
 
@@ -208,12 +343,13 @@ export class SchedulePage {
             <th class="sticky-col third-col">備註<br><span style="font-size:0.65rem; color:#666;">(狀態/偏好)</span></th>
         `;
 
-        // (A) 渲染上月最後 6 天
+        // (A) 渲染上月最後 6 天 (唯讀)
         if (prevMonthInfo && prevMonthInfo.displayDays) {
             prevMonthInfo.displayDays.forEach(day => {
                 const dateObj = new Date(prevMonthInfo.year, prevMonthInfo.month - 1, day);
                 const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
-                // 樣式：灰色背景，透明度高一點
+                
+                // 灰色背景，不區分假日
                 html += `<th class="bg-secondary text-white" style="min-width:40px; opacity: 0.7;">
                     ${prevMonthInfo.month}/${day}<br><span style="font-size:0.75rem">${weekStr}</span>
                 </th>`;
@@ -227,13 +363,12 @@ export class SchedulePage {
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
             const weekStr = ['日','一','二','三','四','五','六'][dayOfWeek];
             
-            // 修改：假日只標紅字，移除 bg-light-gray 以保持白色背景(或依需求)
+            // 假日僅紅字，無背景
             html += `<th class="${isWeekend ? 'text-danger' : ''}">
                 ${d}<br><span style="font-size:0.75rem">${weekStr}</span>
             </th>`;
         }
         
-        // 右側固定統計欄
         html += `<th class="sticky-col right-col-4">OFF</th>
                  <th class="sticky-col right-col-3">假日</th>
                  <th class="sticky-col right-col-2">小夜</th>
@@ -242,12 +377,11 @@ export class SchedulePage {
         return html;
     }
 
-    // ... (_renderRemarks 保持不變) ...
     _renderRemarks(staff, preSchedule) {
-        // (保持原代碼)
         let html = '';
         const constraints = staff.constraints || {};
         const uid = staff.uid;
+        
         if (constraints.isPregnant) html += '<span class="badge bg-danger me-1" title="懷孕">孕</span>';
         if (constraints.isPostpartum) html += '<span class="badge bg-warning text-dark me-1" title="哺乳">哺</span>';
         if (constraints.canBatch) html += '<span class="badge bg-info text-dark me-1" title="可包班">包</span>';
@@ -273,9 +407,6 @@ export class SchedulePage {
         return html;
     }
 
-    // ==========================================
-    // 3. 修改 renderStaffRow：渲染上月班別
-    // ==========================================
     renderStaffRow(staff, assignments, daysInMonth, unitSettings) {
         const uid = staff.uid;
         const wishes = this.state.preSchedule?.submissions?.[uid]?.wishes || {};
@@ -296,6 +427,7 @@ export class SchedulePage {
         // (A) 渲染上月資料 (唯讀)
         if (prevMonthInfo && prevMonthInfo.displayDays) {
             const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
+            
             prevMonthInfo.displayDays.forEach(day => {
                 const code = prevAssignments[day] || '';
                 
@@ -304,6 +436,7 @@ export class SchedulePage {
                 if (code === 'N') style = 'background-color: #495057; color: #fff; opacity: 0.6;';
                 else if (code === 'E') style = 'background-color: #ffc107; color: #000; opacity: 0.5;';
                 else if (code === 'D') style = 'background-color: #d1e7dd; color: #0f5132; opacity: 0.6;';
+                else if (code === 'OFF' || code === 'M_OFF') style = 'background-color: #f0f0f0; color: #999; opacity: 0.7;';
                 
                 html += `<td style="${style}" title="上月 ${day} 日 (唯讀)">
                     <span style="font-size: 0.85rem;">${code === 'M_OFF' ? 'OFF' : code}</span>
@@ -312,7 +445,10 @@ export class SchedulePage {
         }
         
         // 統計變數
-        let countOFF = 0, countHolidayOFF = 0, countE = 0, countN = 0;
+        let countOFF = 0;       
+        let countHolidayOFF = 0;
+        let countE = 0;         
+        let countN = 0;         
 
         // (B) 渲染本月資料
         for (let d = 1; d <= daysInMonth; d++) {
@@ -321,14 +457,19 @@ export class SchedulePage {
 
             const date = new Date(this.state.year, this.state.month - 1, d);
             const dayOfWeek = date.getDay();
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; 
             
             // 統計
             if (shift === 'OFF' || shift === 'M_OFF') {
                 countOFF++;
-                if (isWeekend) countHolidayOFF++;
-            } else if (shift === 'E') countE++;
-            else if (shift === 'N') countN++;
+                if (isWeekend) {
+                    countHolidayOFF++;
+                }
+            } else if (shift === 'E') {
+                countE++;
+            } else if (shift === 'N') {
+                countN++;
+            }
 
             let cellStyle = this.getShiftStyle(shift);
             let markerHtml = '';
@@ -339,9 +480,6 @@ export class SchedulePage {
                    cellStyle += 'background-color: #fff3cd !important;'; 
                 }
             }
-            
-            // 修改：移除週末背景色邏輯，保持表格乾淨
-            // if (isWeekend) cellStyle += 'background-color: #f8f9fa;'; 
 
             html += `<td class="shift-cell wish-cell" style="${cellStyle}" data-uid="${uid}" data-day="${d}">
                 ${markerHtml}
@@ -350,7 +488,7 @@ export class SchedulePage {
             </td>`;
         }
 
-        // 統計欄位
+        // 渲染統計結果
         html += `<td class="sticky-col right-col-4 text-center fw-bold">${countOFF}</td>
                  <td class="sticky-col right-col-3 text-center fw-bold text-success">${countHolidayOFF}</td>
                  <td class="sticky-col right-col-2 text-center fw-bold text-warning-dark">${countE}</td>
@@ -359,9 +497,6 @@ export class SchedulePage {
         return html;
     }
 
-    // ==========================================
-    // 4. 修改 renderStatsRow：底部統計補白
-    // ==========================================
     renderStatsRow(daysInMonth, assignments, unitSettings) {
         const staffReq = unitSettings.staffRequirements || {}; 
         const availableShifts = unitSettings.settings?.shifts || [
@@ -381,7 +516,7 @@ export class SchedulePage {
                 <td class="sticky-col third-col small text-muted">實際/需求</td>
             `;
 
-            // (A) 上月欄位補白 (空 TD)
+            // (A) 上月欄位補白
             if (prevMonthInfo && prevMonthInfo.displayDays) {
                 prevMonthInfo.displayDays.forEach(() => {
                     rowsHtml += `<td class="bg-light"></td>`;
@@ -419,25 +554,312 @@ export class SchedulePage {
         return rowsHtml;
     }
     
-    // ... (getShiftStyle, attachEvents, calculateScore, openScoreModal, resetToPreSchedule, performReset, openVersionsModal, renderVersions, renderVersionTable, renderScoreSummary, applyVersion, saveSchedule, openSettingsModal 保持不變) ...
+    getShiftStyle(shift) {
+        if (!shift) return '';
+        if (shift === 'OFF') return 'background-color: #f0f0f0; color: #999;';
+        if (shift === 'M_OFF') return 'background-color: #dc3545; color: white;';
+        if (shift === 'N') return 'background-color: #212529; color: white;';
+        if (shift === 'E') return 'background-color: #ffc107; color: #000;';
+        if (shift === 'D') return 'background-color: #d1e7dd; color: #0f5132;';
+        return '';
+    }
 
-    // 提醒：在 renderVersionTable (AI 排班結果預覽) 裡，因為是使用 SchedulePage 的內部方法，
-    // 您可能也需要對 renderVersionTable 做類似 renderHeader/renderStaffRow 的調整，
-    // 或者直接讓 renderVersions 改用 SchedulePageTemplate.renderGrid (如下推薦)
-    
+    attachEvents() {
+        document.addEventListener('click', this.handleGlobalClick);
+        
+        const thead = document.getElementById('schedule-thead');
+        if (thead) {
+            thead.addEventListener('click', (e) => {
+                const target = e.target.closest('th[data-sort]');
+                if (target) {
+                    const sortKey = target.dataset.sort;
+                    if (this.state.sortKey === sortKey) {
+                        this.state.sortAsc = !this.state.sortAsc;
+                    } else {
+                        this.state.sortKey = sortKey;
+                        this.state.sortAsc = true;
+                    }
+                    this.state.staffList.sort((a, b) => {
+                        const valA = a[this.state.sortKey] || '';
+                        const valB = b[this.state.sortKey] || '';
+                        if (valA < valB) return this.state.sortAsc ? -1 : 1;
+                        if (valA > valB) return this.state.sortAsc ? 1 : -1;
+                        return 0;
+                    });
+                    this.renderSchedule();
+                }
+            });
+        }
+
+        const tbody = document.getElementById('schedule-tbody');
+        if (tbody) {
+            tbody.addEventListener('change', (e) => {
+                const input = e.target.closest('.shift-input');
+                if (input) {
+                    const uid = input.dataset.uid;
+                    const day = parseInt(input.dataset.day);
+                    const shift = input.value.toUpperCase().trim();
+                    
+                    this.state.scheduleData.assignments[uid] = this.state.scheduleData.assignments[uid] || {};
+                    this.state.scheduleData.assignments[uid][day] = shift;
+                    
+                    this.renderSchedule();
+                }
+            });
+        }
+    }
+
+    async calculateScore() {
+        const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
+        if (!scheduleData || !unitSettings || !preSchedule) return;
+        if (typeof ScoringService === 'undefined') return;
+
+        const scoreResult = ScoringService.calculate(scheduleData, staffList, unitSettings, preSchedule);
+        this.state.scoreResult = scoreResult;
+        
+        const scoreDisplay = document.getElementById('score-display');
+        if (scoreDisplay) {
+            scoreDisplay.textContent = `${scoreResult.totalScore}`;
+            scoreDisplay.className = `mb-0 fw-bold ${scoreResult.passed ? 'text-success' : 'text-danger'}`;
+        }
+    }
+
+    openScoreModal(versionIndex = -1) {
+        const scoreResult = versionIndex === -1 ? this.state.scoreResult : this.generatedVersions[versionIndex].scoreResult;
+        if (!scoreResult) return;
+
+        const body = document.getElementById('score-modal-body');
+        let html = `<div class="row">`;
+        
+        Object.keys(scoreResult.details).forEach(key => {
+            const detail = scoreResult.details[key];
+            const colorMap = { fairness: 'primary', regularity: 'warning', satisfaction: 'info', efficiency: 'success', cost: 'secondary' };
+            const color = colorMap[key] || 'secondary';
+            
+            html += `
+                <div class="col-md-6 mb-4">
+                    <div class="card border-left-${color} shadow h-100">
+                        <div class="card-body">
+                            <h6 class="text-${color} fw-bold text-uppercase mb-2">${detail.label}</h6>
+                            <div class="h4 fw-bold text-gray-800 mb-2">${detail.score} / ${detail.max} 分</div>
+                            <ul class="list-unstyled small mb-0">
+                                ${detail.subItems.map(item => `
+                                    <li class="d-flex justify-content-between border-bottom py-1">
+                                        <span>${item.name}</span> 
+                                        <span>${item.value} (${item.grade})</span>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += `</div>`;
+        body.innerHTML = html;
+        this.scoreModal.show();
+    }
+
+    resetToPreSchedule() {
+        if(confirm("確定重置？將清除所有目前手動排班內容，並載入預班資料。")) {
+            this.performReset(true);
+        }
+    }
+
+    performReset(refreshUI = true) {
+        const { preSchedule, staffList } = this.state;
+        const newAssignments = {};
+        
+        staffList.forEach(s => { newAssignments[s.uid] = {}; });
+        
+        if (preSchedule && preSchedule.submissions) {
+            Object.entries(preSchedule.submissions).forEach(([uid, sub]) => {
+                if(sub.wishes && newAssignments[uid]) {
+                    Object.entries(sub.wishes).forEach(([d, w]) => { 
+                        newAssignments[uid][d] = (w === 'M_OFF' ? 'OFF' : w); 
+                    });
+                }
+            });
+        }
+        
+        this.state.scheduleData.assignments = newAssignments;
+        if (refreshUI) {
+            this.renderSchedule();
+            alert("✅ 已重置為預班狀態");
+        }
+    }
+
+    async openVersionsModal() {
+        const { scheduleData, staffList, unitSettings, preSchedule } = this.state;
+        
+        if (!scheduleData || !unitSettings) {
+            alert('資料尚未載入完成，請稍後再試。');
+            return;
+        }
+        
+        const modalBody = document.getElementById('versions-modal-body');
+        modalBody.innerHTML = `<div class="text-center p-5"><i class="fas fa-spinner fa-spin fa-3x"></i><p class="mt-3">AI 正在努力排班中，請稍候...</p></div>`;
+        this.versionsModal.show();
+
+        this.generatedVersions = [];
+        const strategies = ['A', 'B', 'C']; 
+
+        let prevY = this.state.year;
+        let prevM = this.state.month - 1;
+        if (prevM === 0) { prevM = 12; prevY--; }
+
+        const aiContext = {
+            year: prevY,
+            month: prevM,
+            assignments: scheduleData.prevAssignments || {},
+            submissions: preSchedule?.submissions || {} 
+        };
+
+        for (let i = 0; i < strategies.length; i++) {
+            const strategyCode = strategies[i];
+            
+            if (typeof AutoScheduler !== 'undefined') {
+                try {
+                    const result = await AutoScheduler.run(scheduleData, staffList, unitSettings, aiContext, strategyCode);
+                    
+                    const scoreResult = ScoringService.calculate({ ...scheduleData, assignments: result.assignments }, staffList, unitSettings, preSchedule);
+                    
+                    this.generatedVersions.push({
+                        strategyCode,
+                        assignments: result.assignments,
+                        scoreResult,
+                        logs: result.logs
+                    });
+                } catch (e) {
+                    console.error("AI Error:", e);
+                }
+            }
+        }
+
+        this.renderVersions();
+    }
+
+    renderVersions() {
+        const modalBody = document.getElementById('versions-modal-body');
+        
+        if (this.generatedVersions.length === 0) {
+            modalBody.innerHTML = `<div class="text-center p-5 text-danger">AI 排班生成失敗，請檢查 AutoScheduler。</div>`;
+            return;
+        }
+
+        let navHtml = `<ul class="nav nav-tabs" id="versionTabs" role="tablist">`;
+        let contentHtml = `<div class="tab-content" id="versionTabContent">`;
+
+        this.generatedVersions.forEach((version, index) => {
+            const isActive = index === 0;
+            const strategyMap = { 'A': '方案 A: 數值平衡', 'B': '方案 B: 願望優先', 'C': '方案 C: 規律作息' };
+            const strategyName = strategyMap[version.strategyCode] || `版本 ${index + 1}`;
+            const score = version.scoreResult.totalScore;
+            const scoreClass = version.scoreResult.passed ? 'bg-success' : 'bg-warning';
+
+            navHtml += `
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link ${isActive ? 'active' : ''}" id="version-${index}-tab" data-bs-toggle="tab" data-bs-target="#version-${index}" type="button" role="tab">
+                        ${strategyName} <span class="badge ${scoreClass} ms-2">${score} 分</span>
+                    </button>
+                </li>
+            `;
+
+            contentHtml += `
+                <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="version-${index}" role="tabpanel">
+                    <div class="d-flex justify-content-between align-items-center mb-3 pt-3">
+                        <h5 class="fw-bold text-primary">${score} 分</h5>
+                        <button class="btn btn-primary btn-sm" onclick="window.routerPage.applyVersion(${index})">套用此版本</button>
+                    </div>
+                    ${this.renderVersionTable(version.assignments, version.scoreResult)}
+                </div>
+            `;
+        });
+
+        navHtml += `</ul>`;
+        contentHtml += `</div>`;
+
+        modalBody.innerHTML = navHtml + contentHtml;
+    }
+
     renderVersionTable(assignments, scoreResult) {
-        // 建議改用 Template 以減少重複代碼，且 Template 已經包含了新功能
+        // 使用 Template 渲染，確保 AI 預覽也能看到上月資料
         return SchedulePageTemplate.renderGrid(
             { 
                 ...this.state, 
-                scheduleData: { ...this.state.scheduleData, assignments } // 覆蓋為版本排班
+                scheduleData: { ...this.state.scheduleData, assignments } 
             },
-            { staffReport: {} }, // 預覽暫不顯示個別錯誤
-            { isInteractive: false, versionIdx: null }
+            { staffReport: {} }, // 預覽模式不顯示錯誤細節
+            { isInteractive: false } // 唯讀模式
         ) + `
         <div class="mt-3">
             <h6 class="fw-bold">評分細節</h6>
             ${this.renderScoreSummary(scoreResult)}
         </div>`;
+    }
+
+    renderScoreSummary(scoreResult) {
+        let html = `<div class="row g-2 small">`;
+        Object.keys(scoreResult.details).forEach(key => {
+            const detail = scoreResult.details[key];
+            const color = detail.score < (detail.max * 0.6) ? 'danger' : 'success';
+            html += `
+                <div class="col-md-3">
+                    <span class="badge bg-light text-dark border">${detail.label}</span>
+                    <span class="fw-bold ms-1 text-${color}">${detail.score} / ${detail.max}</span>
+                </div>
+            `;
+        });
+        html += `</div>`;
+        return html;
+    }
+
+    applyVersion(index) {
+        const version = this.generatedVersions[index];
+        if (version) {
+            if(!confirm(`確定套用此 AI 版本 (${version.scoreResult.totalScore}分)？這將覆蓋目前的排班。`)) return;
+            
+            // 深拷貝以避免參考問題
+            this.state.scheduleData.assignments = JSON.parse(JSON.stringify(version.assignments));
+            this.state.scheduleData.version = (this.state.scheduleData.version || 0) + 1;
+            
+            this.versionsModal.hide();
+            this.renderSchedule();
+            alert(`✅ 已套用 AI 班表。請記得點擊「儲存排班」以寫入資料庫。`);
+        }
+    }
+
+    async saveSchedule() {
+        const { scheduleData, currentUnitId, year, month } = this.state;
+        if (!scheduleData) return;
+
+        try {
+            await ScheduleService.saveSchedule(currentUnitId, year, month, scheduleData);
+            alert('✅ 排班表已成功儲存！');
+        } catch (e) {
+            alert('儲存失敗: ' + e.message);
+        }
+    }
+    
+    openSettingsModal() {
+        const { currentUnitId } = this.state;
+        if (!currentUnitId) return;
+
+        import('../settings/RuleSettings.js').then(({ RuleSettings }) => {
+            const ruleSettings = new RuleSettings(currentUnitId);
+            ruleSettings.containerId = 'rule-settings-container-modal';
+            this.settingsModal.show();
+            
+            const container = document.getElementById(ruleSettings.containerId);
+            if (container) {
+                container.innerHTML = ruleSettings.render();
+                if (ruleSettings.loadRules) {
+                    ruleSettings.loadRules(currentUnitId).then(() => {});
+                }
+                if (ruleSettings.afterRender) {
+                    setTimeout(() => ruleSettings.afterRender(), 50);
+                }
+            }
+        });
     }
 }
