@@ -84,8 +84,16 @@ export class AutoScheduler {
                 if (days.length > 0) lastShift = prevMonthData[uid][days[0]];
             }
 
+            // 統計預班中的 OFF 天數
+            let preOffCount = 0;
+            const staffWishes = preSchedule?.submissions?.[uid]?.wishes || {};
+            Object.values(staffWishes).forEach(w => {
+                if (w === 'OFF' || w === 'M_OFF') preOffCount++;
+            });
+
             stats[uid] = { 
                 OFF: 0, 
+                preOffCount: preOffCount, // ✅ 新增：預班 OFF 總數
                 consecutive: prevConsecutive,
                 lastShift: lastShift,
                 weekendShifts: 0,
@@ -154,9 +162,18 @@ export class AutoScheduler {
         const blankList = []; 
 
         const sortedStaff = [...staffList].sort((a, b) => {
-            const offA = context.stats[a.uid].OFF;
-            const offB = context.stats[b.uid].OFF;
-            return offA - offB;
+            // ✅ 核心修正：排序權重 = (當月已排 OFF) + (預班中剩餘未排的 OFF)
+            // 這樣預班假多的人，會被視為「假已經很多了」，排序會靠前，從而優先被排去上班
+            const statsA = context.stats[a.uid];
+            const statsB = context.stats[b.uid];
+            
+            const totalPotentialOffA = statsA.OFF + statsA.preOffCount;
+            const totalPotentialOffB = statsB.OFF + statsB.preOffCount;
+            
+            if (totalPotentialOffA !== totalPotentialOffB) {
+                return totalPotentialOffA - totalPotentialOffB;
+            }
+            return statsA.consecutive - statsB.consecutive;
         });
 
         for (const staff of sortedStaff) {
@@ -388,16 +405,20 @@ export class AutoScheduler {
         }));
         deficits.sort((a, b) => b.deficit - a.deficit);
 
-        // 規則1：將已放OFF > 平均休假天數的員工，調整為缺額班別 (增加人力)
-        // 這裡稍微放寬條件，只要比平均多就考慮調整，以達到平衡
+        // 規則1：將「預計總假數」 > 平均休假天數的員工，調整為缺額班別 (增加人力)
         const eligibleStaff = offStaff.filter(uid => {
-            const currentOff = stats[uid].OFF;
-            // 如果目前 OFF 已經比目標多，或者在月中之後 OFF 比例過高，就優先調整
-            return currentOff > context.avgLeaveTarget;
+            const s = stats[uid];
+            const totalPotentialOff = s.OFF + s.preOffCount;
+            // 只要預計總假數超過目標，就優先拉回來上班
+            return totalPotentialOff > context.avgLeaveTarget;
         });
 
-        // 按已放OFF降序排序（休最多的優先調整）
-        eligibleStaff.sort((a, b) => stats[b].OFF - stats[a].OFF);
+        // 按預計總假數降序排序（假最多的優先調整）
+        eligibleStaff.sort((a, b) => {
+            const totalA = stats[a].OFF + stats[a].preOffCount;
+            const totalB = stats[b].OFF + stats[b].preOffCount;
+            return totalB - totalA;
+        });
 
         for (const uid of eligibleStaff) {
             const staff = staffList.find(s => s.uid === uid);
