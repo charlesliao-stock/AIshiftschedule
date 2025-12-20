@@ -22,7 +22,8 @@ export class AutoScheduler {
                 }
 
                 if (day > 1) {
-                    this.step2B_RetroactiveOFF(context, day - 1);
+                    this.step2B_Cycle2_AdjustOFFToShift(context, day - 1);
+                    this.step2B_Cycle3_AdjustShiftToOFF(context, day - 1);
                 }
 
                 this.step2A_ScheduleToday(context, day);
@@ -30,7 +31,8 @@ export class AutoScheduler {
 
             // 🎯 子步驟 3：月底收尾與最終平衡
             if (context.daysInMonth > 0) {
-                this.step2B_RetroactiveOFF(context, context.daysInMonth);
+                this.step2B_Cycle2_AdjustOFFToShift(context, context.daysInMonth);
+                this.step2B_Cycle3_AdjustShiftToOFF(context, context.daysInMonth);
                 this.step3_Finalize(context);
                 
                 // ✅ v2.5 強化版：多階段全月總平衡
@@ -327,9 +329,107 @@ export class AutoScheduler {
     }
 
     // =========================================================================
-    // ⏪ Step 2B: 回溯標記 OFF
+    // ⏪ Step 2B Cycle 3: 第三循環 - 超額班別調整為OFF
     // =========================================================================
-    static step2B_RetroactiveOFF(context, targetDay) {
+    static step2B_Cycle2_AdjustOFFToShift(context, targetDay) {
+        const { assignments, staffReq, stats, staffList } = context;
+        const dayOfWeek = new Date(context.year, context.month - 1, targetDay).getDay();
+
+        // 統計當日各班人數和缺額
+        const currentCounts = { D: 0, E: 0, N: 0 };
+        const offStaff = [];
+
+        Object.keys(assignments).forEach(uid => {
+            const shift = assignments[uid][targetDay];
+            if (['D', 'E', 'N'].includes(shift)) {
+                currentCounts[shift]++;
+            } else if (shift === 'OFF' && !this.isLocked(context, uid, targetDay)) {
+                // 收集非預班的OFF員工
+                offStaff.push(uid);
+            }
+        });
+
+        // 計算各班缺額
+        const deficits = ['D', 'E', 'N'].map(shift => ({
+            shift,
+            deficit: (staffReq[shift]?.[dayOfWeek] || 0) - currentCounts[shift]
+        }));
+        deficits.sort((a, b) => b.deficit - a.deficit);
+
+        // 規則1：將已放OFF >= 平均休假天數的員工，調整為缺額班別
+        const eligibleStaff = offStaff.filter(uid => {
+            const currentOff = stats[uid].OFF;
+            return currentOff >= context.avgLeaveTarget;
+        });
+
+        // 按已放OFF降序排序（休最多的優先調整）
+        eligibleStaff.sort((a, b) => stats[b].OFF - stats[a].OFF);
+
+        for (const uid of eligibleStaff) {
+            const staff = staffList.find(s => s.uid === uid);
+            if (!staff) continue;
+
+            // 找出最需要的班別
+            for (const d of deficits) {
+                if (d.deficit <= 0) continue;
+
+                // 檢查是否可以分配該班別
+                if (this.canAssign(context, staff, targetDay, d.shift)) {
+                    this.assign(context, uid, targetDay, d.shift);
+                    currentCounts[d.shift]++;
+                    d.deficit--;
+                    break;
+                }
+            }
+        }
+
+        // 規則2：前2天連續同班，第3天調整為其他班別
+        ['D', 'E', 'N'].forEach(shift => {
+            const req = staffReq[shift]?.[dayOfWeek] || 0;
+            if (currentCounts[shift] <= req) return; // 沒有超額
+
+            // 找出該班別中前2天連續同班的員工
+            const candidates = [];
+            Object.keys(assignments).forEach(uid => {
+                if (assignments[uid][targetDay] !== shift) return;
+                if (this.isLocked(context, uid, targetDay)) return;
+
+                const d1Shift = this.getShift(context, uid, targetDay - 1);
+                const d2Shift = this.getShift(context, uid, targetDay - 2);
+
+                if (d1Shift === shift && d2Shift === shift) {
+                    candidates.push(uid);
+                }
+            });
+
+            // 調整這些員工到其他缺額班別
+            for (const uid of candidates) {
+                if (currentCounts[shift] <= req) break;
+
+                const staff = staffList.find(s => s.uid === uid);
+                if (!staff) continue;
+
+                // 找出其他缺額班別
+                for (const d of deficits) {
+                    if (d.shift === shift) continue; // 跳過同班別
+                    if (d.deficit <= 0) continue;
+
+                    if (this.canAssign(context, staff, targetDay, d.shift)) {
+                        this.assign(context, uid, targetDay, d.shift);
+                        currentCounts[shift]--;
+                        currentCounts[d.shift]++;
+                        d.deficit--;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    // =========================================================================
+    // ⏪ Step 2B Cycle 3: 第三循環 - 超額班別調整為OFF
+    // =========================================================================
+    static step2B_Cycle3_AdjustShiftToOFF(context, targetDay) {
         const { assignments, staffReq, dailyLeaveQuotas, stats } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, targetDay).getDay();
 
