@@ -89,7 +89,7 @@ export const SchedulePageTemplate = {
         `;
     },
 
-    // 2. 渲染主表格 Grid
+    // 2. 渲染主表格 Grid (包含完整統計與紅點邏輯)
     renderGrid(dataCtx, validationResult, options = {}) {
         const { year, month, daysInMonth, staffList, unitSettings, preSchedule, prevMonthInfo, previousMonthSchedule } = dataCtx;
         const assignments = dataCtx.scheduleData?.assignments || {};
@@ -102,8 +102,7 @@ export const SchedulePageTemplate = {
         shiftMap['OFF'] = { color: '#e5e7eb', name: '休' };
         shiftMap['M_OFF'] = { color: '#6f42c1', name: '管休' };
 
-        // 準備底部統計數據 (初始化計數器)
-        // 結構: { 'D': {1: count, 2: count...}, 'E': {...}, ... }
+        // 統計計數器初始化
         const dailyCounts = {};
         shiftDefs.forEach(s => {
             dailyCounts[s.code] = {};
@@ -111,21 +110,20 @@ export const SchedulePageTemplate = {
         });
 
         // ========== 表頭 Header ==========
-        let headerHtml = '<thead><tr><th class="sticky-col bg-light" style="min-width:140px; z-index:20;">人員 / 日期</th>';
+        let headerHtml = '<thead><tr><th class="sticky-col first-col bg-light" style="z-index:20;">人員</th><th class="sticky-col second-col bg-light" style="z-index:20;">職級</th><th class="sticky-col third-col bg-light" style="z-index:20;">備註</th>';
         
-        // (A) 渲染上月最後 6 天 (表頭)
+        // (A) 上月最後 6 天
         if (prevMonthInfo && prevMonthInfo.displayDays) {
             prevMonthInfo.displayDays.forEach(day => {
                 const dateObj = new Date(prevMonthInfo.year, prevMonthInfo.month - 1, day);
                 const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
-                
                 headerHtml += `<th class="bg-secondary text-white" style="min-width:40px; opacity: 0.7;">
                     ${prevMonthInfo.month}/${day}<br><span style="font-size:0.8em">${weekStr}</span>
                 </th>`;
             });
         }
         
-        // (B) 渲染本月日期 (表頭)
+        // (B) 本月日期
         for (let d = 1; d <= daysInMonth; d++) {
             const dateObj = new Date(year, month - 1, d);
             const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
@@ -139,11 +137,10 @@ export const SchedulePageTemplate = {
             </th>`;
         }
         
-        // 右側統計欄位表頭
-        headerHtml += `<th class="sticky-col bg-light" style="min-width:40px;">OFF</th>
-                       <th class="sticky-col bg-light" style="min-width:40px;">假日</th>
-                       <th class="sticky-col bg-light" style="min-width:40px;">小夜</th>
-                       <th class="sticky-col bg-light" style="min-width:40px;">大夜</th>
+        headerHtml += `<th class="sticky-col right-col-4 bg-light">OFF</th>
+                       <th class="sticky-col right-col-3 bg-light">假日</th>
+                       <th class="sticky-col right-col-2 bg-light">小夜</th>
+                       <th class="sticky-col right-col-1 bg-light">大夜</th>
                        </tr></thead>`;
 
         // ========== 表身 Body ==========
@@ -152,6 +149,8 @@ export const SchedulePageTemplate = {
             const uid = staff.uid;
             const staffAssignments = assignments[uid] || {};
             const staffErrors = staffReport[uid]?.errors || {};
+            // 讀取該員工的預班願望 (Wishes)
+            const wishes = preSchedule?.submissions?.[uid]?.wishes || {};
             
             // 狀態標籤
             let statusBadges = '';
@@ -172,109 +171,104 @@ export const SchedulePageTemplate = {
                 : '';
 
             bodyHtml += `<tr>
-                <td class="sticky-col bg-white" style="z-index:10;">
+                <td class="sticky-col first-col bg-white">
                     <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <strong>${staff.name}</strong> ${statusBadges}<br>
-                            <span class="text-muted small">${staff.rank || ''}</span>
-                            ${wishNote}
-                        </div>
+                        <strong class="text-truncate" style="max-width: 50px;">${staff.name}</strong> ${statusBadges}
                         ${deleteBtn}
                     </div>
-                </td>`;
+                </td>
+                <td class="sticky-col second-col bg-white small text-muted">${staff.rank || ''}</td>
+                <td class="sticky-col third-col bg-white">${wishNote}</td>`;
 
-            // (A) 渲染上月資料 (唯讀)
+            // (A) 上月資料 (唯讀)
             if (prevMonthInfo && prevMonthInfo.displayDays) {
                 const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
-                
                 prevMonthInfo.displayDays.forEach(day => {
                     const code = prevAssignments[day] || '';
                     let style = 'background-color: #e9ecef; color: #6c757d; opacity: 0.8;';
                     if (code === 'N') style = 'background-color: #495057; color: #fff; opacity: 0.6;';
                     else if (code === 'E') style = 'background-color: #ffc107; color: #000; opacity: 0.5;';
                     else if (code === 'D') style = 'background-color: #d1e7dd; color: #0f5132; opacity: 0.6;';
-                    else if (code === 'OFF' || code === 'M_OFF') style = 'background-color: #f0f0f0; color: #999; opacity: 0.7;';
                     
-                    bodyHtml += `<td style="${style}" title="上月 ${day} 日 (唯讀)">
-                        <span style="font-size: 0.85rem;">${code === 'M_OFF' ? 'OFF' : code}</span>
-                    </td>`;
+                    bodyHtml += `<td style="${style}"><span style="font-size: 0.85rem;">${code === 'M_OFF' ? 'OFF' : code}</span></td>`;
                 });
             }
 
-            // 初始化個人統計
             let countOFF = 0, countHolidayOFF = 0, countE = 0, countN = 0;
 
-            // (B) 渲染本月日期
+            // (B) 本月日期
             for (let d = 1; d <= daysInMonth; d++) {
                 const code = staffAssignments[d] || '';
+                const wish = wishes[d]; // 取得該日的預班
                 
-                // 1. 個人統計
+                // 統計
                 const dateObj = new Date(year, month - 1, d);
                 const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
-                
                 if (code === 'OFF' || code === 'M_OFF') {
                     countOFF++;
                     if (isWeekend) countHolidayOFF++;
-                } else if (code === 'E') {
-                    countE++;
-                } else if (code === 'N') {
-                    countN++;
-                }
+                } else if (code === 'E') countE++;
+                else if (code === 'N') countN++;
 
-                // 2. 全體統計 (累積)
-                if (dailyCounts[code]) {
-                    dailyCounts[code][d] = (dailyCounts[code][d] || 0) + 1;
-                }
+                if (dailyCounts[code]) dailyCounts[code][d] = (dailyCounts[code][d] || 0) + 1;
 
-                // 3. 渲染儲存格
+                // 樣式
                 let style = '';
-                if(code === 'M_OFF') {
-                    style = 'background-color:#6f42c1; color:white;';
-                } else if (code && shiftMap[code]) {
-                    style = `background-color:${shiftMap[code].color}40; border-bottom: 2px solid ${shiftMap[code].color}`;
-                }
+                if(code === 'M_OFF') style = 'background-color:#6f42c1; color:white;';
+                else if (code && shiftMap[code]) style = `background-color:${shiftMap[code].color}40; border-bottom: 2px solid ${shiftMap[code].color}`;
                 
+                // 🚩 紅點邏輯 (Restored Red Dot)
+                let markerHtml = '';
+                if (wish) {
+                    markerHtml = `<div class="wish-marker" title="預班: ${wish}">●</div>`;
+                    // 如果實際排班與預班不同，背景變黃提醒
+                    if (wish !== code && wish !== (code === 'OFF' ? 'M_OFF' : '')) {
+                         style += 'background-color: #fff3cd !important;'; 
+                    }
+                }
+
                 const errorMsg = staffErrors[d];
                 const borderStyle = errorMsg ? 'border: 2px solid red !important;' : '';
                 const title = errorMsg ? `title="${errorMsg}"` : '';
                 const cellClass = isInteractive ? 'shift-cell' : ''; 
+                // 加入 wish-cell 類別以便定位紅點
+                const wishClass = 'wish-cell'; 
                 const cursor = isInteractive ? 'cursor:pointer;' : '';
                 const dropAttrs = isDropZone ? `ondragover="event.preventDefault()" ondrop="window.routerPage.handleDrop(event, '${uid}', ${d}, ${versionIdx})"` : '';
 
-                bodyHtml += `<td class="${cellClass}" data-staff-id="${uid}" data-day="${d}" 
+                bodyHtml += `<td class="${cellClass} ${wishClass}" data-staff-id="${uid}" data-day="${d}" 
                     style="${cursor} ${style}; ${borderStyle}" ${title} ${dropAttrs}>
+                    ${markerHtml}
                     ${code === 'M_OFF' ? 'OFF' : code}
                 </td>`;
             }
             
-            // (C) 渲染右側統計
-            bodyHtml += `<td class="bg-white text-center fw-bold">${countOFF}</td>
-                         <td class="bg-white text-center fw-bold text-success">${countHolidayOFF}</td>
-                         <td class="bg-white text-center fw-bold text-warning-dark">${countE}</td>
-                         <td class="bg-white text-center fw-bold text-danger">${countN}</td>
+            // (C) 右側統計
+            bodyHtml += `<td class="sticky-col right-col-4 bg-white text-center fw-bold">${countOFF}</td>
+                         <td class="sticky-col right-col-3 bg-white text-center fw-bold text-success">${countHolidayOFF}</td>
+                         <td class="sticky-col right-col-2 bg-white text-center fw-bold text-warning-dark">${countE}</td>
+                         <td class="sticky-col right-col-1 bg-white text-center fw-bold text-danger">${countN}</td>
                          </tr>`;
         });
 
-        // ========== 底部需求統計列 Stats Rows ==========
+        // ========== 底部需求統計 ==========
         const staffReq = unitSettings.staffRequirements || {}; 
-        
         shiftDefs.forEach(shiftDef => {
             const code = shiftDef.code;
             const name = shiftDef.name;
             
             bodyHtml += `<tr class="stats-row" style="border-top: 2px solid #666;">
-                <td class="sticky-col bg-light fw-bold text-end pe-2" style="z-index:10;">${name}</td>`;
-                
-            // 上月補白
+                <td class="sticky-col first-col bg-light"></td>
+                <td class="sticky-col second-col bg-light fw-bold text-end pe-2">${name}</td>
+                <td class="sticky-col third-col bg-light small text-muted">實際/需求</td>`;
+            
             if (prevMonthInfo && prevMonthInfo.displayDays) {
                 prevMonthInfo.displayDays.forEach(() => bodyHtml += '<td class="bg-light"></td>');
             }
             
-            // 本月統計
             for (let d = 1; d <= daysInMonth; d++) {
                 const date = new Date(year, month - 1, d);
                 const dayOfWeek = date.getDay();
-                
                 const required = staffReq[code]?.[dayOfWeek] || 0;
                 const assigned = dailyCounts[code] ? dailyCounts[code][d] : 0;
                 
@@ -284,9 +278,7 @@ export const SchedulePageTemplate = {
                 
                 bodyHtml += `<td class="text-center small ${textClass}" style="background-color:#f8f9fa;">${assigned}/${required}</td>`;
             }
-            
-            // 右側補白 (對應4個統計欄位)
-            bodyHtml += `<td class="bg-light"></td><td class="bg-light"></td><td class="bg-light"></td><td class="bg-light"></td></tr>`;
+            bodyHtml += `<td class="sticky-col right-col-4 bg-light"></td><td class="sticky-col right-col-3 bg-light"></td><td class="sticky-col right-col-2 bg-light"></td><td class="sticky-col right-col-1 bg-light"></td></tr>`;
         });
 
         bodyHtml += '</tbody>';
