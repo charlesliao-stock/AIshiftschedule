@@ -9,7 +9,7 @@ import { RuleEngine } from "../ai/RuleEngine.js";
 import { AutoScheduler } from "../ai/AutoScheduler.js";
 
 // 引用 Template (用於 AI 版本預覽)
-import { SchedulePageTemplate } from "./template/SchedulePageTemplate.js";
+import { SchedulePageTemplate } from "./templates/SchedulePageTemplate.js";
 
 export class SchedulePage {
     constructor() {
