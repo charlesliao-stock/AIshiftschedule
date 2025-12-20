@@ -4,12 +4,12 @@ const MAX_RUNTIME = 60000;
 
 export class AutoScheduler {
 
-    static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
+    static async run(currentSchedule, staffList, unitSettings, preScheduleData, previousMonthAssignments = {}, strategyCode = 'A') {
         console.log(`🚀 AI 排班啟動 (v2.5 夜班類型限制版): 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
-            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData);
+            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, previousMonthAssignments);
 
             // 🎯 子步驟 1：準備工作
             this.step1_Preparation(context);
@@ -53,7 +53,7 @@ export class AutoScheduler {
     // 🛠️ 初始化
     // =========================================================================
 
-    static prepareContext(schedule, staffList, unitSettings, preSchedule) {
+    static prepareContext(schedule, staffList, unitSettings, preSchedule, previousMonthAssignments) {
         const assignments = {};
         const stats = {};
         const preferences = {}; 
@@ -72,6 +72,13 @@ export class AutoScheduler {
             };
             
             allShifts.forEach(s => stats[uid][s] = 0);
+
+            // 整合上個月月底 6 天的班次 (規則 1)
+            for (let d = -6; d < 0; d++) {
+                if (previousMonthAssignments[uid] && previousMonthAssignments[uid][d]) {
+                    assignments[uid][d] = previousMonthAssignments[uid][d];
+                }
+            }
 
             const sub = preSchedule?.submissions?.[uid];
             preferences[uid] = sub?.preferences || {};
@@ -191,10 +198,37 @@ export class AutoScheduler {
     }
 
     // ✅ v2.5 核心改进：严格遵守夜班类型限制
-    static generateWhitelist(context, staff) {
+    static generateWhitelist(context, staff, day) {
         let list = ['D', 'E', 'N', 'OFF'];
         const constraints = staff.constraints || {};
         const prefs = context.preferences[staff.uid] || {};
+        
+        // 規則 2.2：月初 6 天內排班策略調整
+        const isEarlyMonth = day <= 6;
+        const prevShift = this.getShift(context, staff.uid, day - 1);
+        
+        // 檢查是否已在月初休息過 (簡單標記：前一天是 OFF 且在月初 6 天內)
+        const hasTakenEarlyMonthOff = isEarlyMonth && prevShift === 'OFF';
+
+        // ---------------------------------------------------------------------
+        // 規則 2.2.1: 月初 6 天內，順接上個月的班，以滿足人力需求為主
+        // ---------------------------------------------------------------------
+        if (isEarlyMonth && !hasTakenEarlyMonthOff) {
+            // 順接上個月的班 (即前一天是上班班次)
+            if (['D', 'E', 'N'].includes(prevShift)) {
+                // 優先將前一天的班次加入白名單
+                list = list.filter(s => s === prevShift || s === 'OFF');
+                context.logs.push(`  ${staff.name} Day ${day}: 月初順接前班 (${prevShift}) 模式，白名單: ${list.join(', ')}`);
+                return list;
+            }
+            // 如果前一天是 OFF，則進入正常邏輯，但會被 hasTakenEarlyMonthOff 標記
+        }
+        
+        // ---------------------------------------------------------------------
+        // 規則 2.2.2: OFF 後的班次需要配合同仁的排班偏好 (或非月初)
+        // ---------------------------------------------------------------------
+        
+        // 孕哺限制 (規則 2.2)
 
         // 孕哺限制 (規則 2.2)
         if (constraints.isPregnant || constraints.isPostpartum) {
