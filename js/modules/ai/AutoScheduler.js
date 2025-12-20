@@ -93,10 +93,10 @@ export class AutoScheduler {
 
             stats[uid] = { 
                 OFF: 0, 
-                preOffCount: preOffCount, // ✅ 新增：預班 OFF 總數
+                preOffCount: preOffCount,
                 consecutive: prevConsecutive,
                 lastShift: lastShift,
-                weekendShifts: 0,
+                weekendShifts: 0, // ✅ 用於追蹤假日工作天數
                 shiftTypes: new Set()
             };
             
@@ -162,17 +162,25 @@ export class AutoScheduler {
         const blankList = []; 
 
         const sortedStaff = [...staffList].sort((a, b) => {
-            // ✅ 核心修正：排序權重 = (當月已排 OFF) + (預班中剩餘未排的 OFF)
-            // 這樣預班假多的人，會被視為「假已經很多了」，排序會靠前，從而優先被排去上班
             const statsA = context.stats[a.uid];
             const statsB = context.stats[b.uid];
             
+            // 1. 優先平衡總假數 (含預班)
             const totalPotentialOffA = statsA.OFF + statsA.preOffCount;
             const totalPotentialOffB = statsB.OFF + statsB.preOffCount;
-            
             if (totalPotentialOffA !== totalPotentialOffB) {
                 return totalPotentialOffA - totalPotentialOffB;
             }
+            
+            // 2. 假日權重：若是週末，優先讓假日工作少的人排班
+            const date = new Date(context.year, context.month - 1, day);
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            if (isWeekend) {
+                if (statsA.weekendShifts !== statsB.weekendShifts) {
+                    return statsA.weekendShifts - statsB.weekendShifts;
+                }
+            }
+            
             return statsA.consecutive - statsB.consecutive;
         });
 
@@ -341,6 +349,14 @@ export class AutoScheduler {
         const { staffReq } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, day).getDay();
 
+        // 1. 確定目標需求
+        const targetCounts = {
+            D: staffReq['D']?.[dayOfWeek] || 0,
+            E: staffReq['E']?.[dayOfWeek] || 0,
+            N: staffReq['N']?.[dayOfWeek] || 0
+        };
+
+        // 2. 計算目前已排人數 (來自預班)
         const currentCounts = { D: 0, E: 0, N: 0 };
         Object.values(context.assignments).forEach(shifts => {
             if (shifts[day] && currentCounts[shifts[day]] !== undefined) {
@@ -348,32 +364,69 @@ export class AutoScheduler {
             }
         });
 
+        // 3. 排序待分配名單 (假少者優先)
         blankList.sort((a, b) => {
-            const offA = context.stats[a.staff.uid].OFF;
-            const offB = context.stats[b.staff.uid].OFF;
-            return offA - offB;
+            const statsA = context.stats[a.staff.uid];
+            const statsB = context.stats[b.staff.uid];
+            const totalA = statsA.OFF + statsA.preOffCount;
+            const totalB = statsB.OFF + statsB.preOffCount;
+            return totalA - totalB;
         });
 
-        for (const item of blankList) {
-            const { staff, whitelist } = item;
+        // 4. 分配班別
+        for (const { staff, whitelist } of blankList) {
+            const prevShift = this.getShift(context, staff.uid, day - 1);
+            const prevPrevShift = this.getShift(context, staff.uid, day - 2);
             
-            const deficits = ['D', 'E', 'N'].map(shift => ({
-                shift, 
-                deficit: (staffReq[shift]?.[dayOfWeek] || 0) - currentCounts[shift]
-            }));
-            deficits.sort((a, b) => b.deficit - a.deficit);
+            let assigned = false;
 
-            let assigned = 'OFF'; 
-            
-            for (const d of deficits) {
-                if (d.deficit > 0 && whitelist.includes(d.shift)) {
-                    assigned = d.shift;
-                    break;
+            // ✅ 邏輯 A：班別延續原則 (優先排與前一天相同的班)
+            // 條件：前一天有上班、該班別有缺額、在白名單內、且未連續上滿 2 天
+            if (['D', 'E', 'N'].includes(prevShift) && 
+                currentCounts[prevShift] < targetCounts[prevShift] && 
+                whitelist.includes(prevShift) && 
+                prevShift !== prevPrevShift) {
+                
+                this.assign(context, staff.uid, day, prevShift);
+                currentCounts[prevShift]++;
+                assigned = true;
+            }
+
+            // ✅ 邏輯 B：人力缺口優先 (若邏輯 A 未分配，則填補缺額最大的班別)
+            if (!assigned) {
+                const sortedShifts = ['D', 'E', 'N'].sort((a, b) => {
+                    const deficitA = targetCounts[a] - currentCounts[a];
+                    const deficitB = targetCounts[b] - currentCounts[b];
+                    return deficitB - deficitA;
+                });
+
+                for (const shift of sortedShifts) {
+                    if (currentCounts[shift] < targetCounts[shift] && whitelist.includes(shift)) {
+                        this.assign(context, staff.uid, day, shift);
+                        currentCounts[shift]++;
+                        assigned = true;
+                        break;
+                    }
                 }
             }
-            
-            this.assign(context, staff.uid, day, assigned);
-            if (assigned !== 'OFF') currentCounts[assigned]++;
+
+            // ✅ 邏輯 C：保底分配 (若目標需求已滿，但白名單仍有班別，則選一個分配以避免過多 OFF)
+            if (!assigned) {
+                const sortedShifts = ['D', 'E', 'N'].sort((a, b) => currentCounts[a] - currentCounts[b]);
+                for (const shift of sortedShifts) {
+                    if (whitelist.includes(shift)) {
+                        this.assign(context, staff.uid, day, shift);
+                        currentCounts[shift]++;
+                        assigned = true;
+                        break;
+                    }
+                }
+            }
+
+            // 最後保險
+            if (!assigned) {
+                this.assign(context, staff.uid, day, 'OFF');
+            }
         }
     }
 
@@ -1007,6 +1060,7 @@ export class AutoScheduler {
         
         // 重置部分統計
         stats.OFF = 0;
+        stats.weekendShifts = 0; // ✅ 重置假日統計
         stats.shiftTypes = new Set();
         ['D', 'E', 'N'].forEach(s => stats[s] = 0);
         
@@ -1033,6 +1087,12 @@ export class AutoScheduler {
                 stats[s]++;
                 stats.shiftTypes.add(s);
                 currentConsecutive++;
+                
+                // ✅ 統計假日工作天數
+                const date = new Date(context.year, context.month - 1, d);
+                if (date.getDay() === 0 || date.getDay() === 6) {
+                    stats.weekendShifts++;
+                }
             }
             
             // 這裡更新的是「當前掃描到這一天」的連續天數
