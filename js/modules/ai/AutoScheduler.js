@@ -947,6 +947,10 @@ export class AutoScheduler {
                 return h * 60 + m;
             };
             map[s.code] = { start: parse(s.startTime), end: parse(s.endTime) };
+            // 跨日處理：如果結束時間小於開始時間，則結束時間加 24 小時 (1440 分鐘)
+            if (map[s.code].end <= map[s.code].start) {
+                map[s.code].end += 1440;
+            }
         });
         if (!map['D']) map['D'] = { start: 480, end: 960 };
         if (!map['E']) map['E'] = { start: 960, end: 1440 };
