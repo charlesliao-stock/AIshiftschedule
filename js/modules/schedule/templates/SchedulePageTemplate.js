@@ -128,18 +128,25 @@ export const SchedulePageTemplate = {
         // ========== 表頭 Header ==========
         let headerHtml = '<thead><tr><th class="sticky-col bg-light" style="min-width:140px; z-index:20;">人員 / 日期</th>';
         
-        // (A) 渲染上月最後 6 天
-        if (prevMonthInfo && prevMonthInfo.displayDays) {
-            prevMonthInfo.displayDays.forEach(day => {
-                const dateObj = new Date(prevMonthInfo.year, prevMonthInfo.month - 1, day);
-                const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
+// (A) 渲染上月最後 6 天（唯讀，灰色背景）
+            if (prevMonthInfo && prevMonthInfo.displayDays) {  // ⬅️ 這裡必須要有大括號
+                const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
                 
-                // 灰色背景，不區分假日
-                headerHtml += `<th class="bg-secondary text-white" style="min-width:40px; opacity: 0.7;">
-                    ${prevMonthInfo.month}/${day}<br><span style="font-size:0.8em">${weekStr}</span>
-                </th>`;
-            });
-        }
+                prevMonthInfo.displayDays.forEach(day => {
+                    const code = prevAssignments[day] || '';
+                    
+                    // 灰色背景，不區分假日，根據班別微調
+                    let style = 'background-color: #e9ecef; color: #6c757d; opacity: 0.8;';
+                    if (code === 'N') style = 'background-color: #495057; color: #fff; opacity: 0.6;';
+                    else if (code === 'E') style = 'background-color: #ffc107; color: #000; opacity: 0.5;';
+                    else if (code === 'D') style = 'background-color: #d1e7dd; color: #0f5132; opacity: 0.6;';
+                    else if (code === 'OFF' || code === 'M_OFF') style = 'background-color: #f0f0f0; color: #999; opacity: 0.7;';
+                    
+                    bodyHtml += `<td style="${style}" title="上月 ${day} 日 (唯讀)">
+                        <span style="font-size: 0.85rem;">${code === 'M_OFF' ? 'OFF' : code}</span>
+                    </td>`;
+                });
+            } // ⬅️ 記得閉合大括號
         
         // (B) 渲染本月日期
         for (let d = 1; d <= daysInMonth; d++) {
