@@ -78,21 +78,10 @@ export const SchedulePageTemplate = {
                 </div>
 
                 <div class="modal fade" id="versions-modal" tabindex="-1">
-                    <div class="modal-dialog modal-xl">
+                    <div class="modal-dialog modal-fullscreen">
                         <div class="modal-content">
-                            <div class="modal-header bg-gradient-primary text-white"><h5 class="modal-title">AI 排班結果</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
-                            <div class="modal-body p-0">
-                                <ul class="nav nav-tabs nav-fill bg-light" id="versionTabs" role="tablist">
-                                    <li class="nav-item"><button class="nav-link active fw-bold" data-bs-toggle="tab" data-bs-target="#v1">版本 1</button></li>
-                                    <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="tab" data-bs-target="#v2">版本 2</button></li>
-                                    <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="tab" data-bs-target="#v3">版本 3</button></li>
-                                </ul>
-                                <div class="tab-content" id="versionTabsContent">
-                                    <div class="tab-pane fade show active" id="v1"></div>
-                                    <div class="tab-pane fade" id="v2"></div>
-                                    <div class="tab-pane fade" id="v3"></div>
-                                </div>
-                            </div>
+                            <div class="modal-header bg-primary text-white"><h5 class="modal-title">AI 排班結果</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+                            <div class="modal-body bg-light p-3" id="versions-modal-body"></div>
                         </div>
                     </div>
                 </div>
@@ -113,6 +102,14 @@ export const SchedulePageTemplate = {
         shiftMap['OFF'] = { color: '#e5e7eb', name: '休' };
         shiftMap['M_OFF'] = { color: '#6f42c1', name: '管休' };
 
+        // 準備底部統計數據 (初始化計數器)
+        // 結構: { 'D': {1: count, 2: count...}, 'E': {...}, ... }
+        const dailyCounts = {};
+        shiftDefs.forEach(s => {
+            dailyCounts[s.code] = {};
+            for(let d=1; d<=daysInMonth; d++) dailyCounts[s.code][d] = 0;
+        });
+
         // ========== 表頭 Header ==========
         let headerHtml = '<thead><tr><th class="sticky-col bg-light" style="min-width:140px; z-index:20;">人員 / 日期</th>';
         
@@ -122,7 +119,6 @@ export const SchedulePageTemplate = {
                 const dateObj = new Date(prevMonthInfo.year, prevMonthInfo.month - 1, day);
                 const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
                 
-                // 灰色背景，不區分假日
                 headerHtml += `<th class="bg-secondary text-white" style="min-width:40px; opacity: 0.7;">
                     ${prevMonthInfo.month}/${day}<br><span style="font-size:0.8em">${weekStr}</span>
                 </th>`;
@@ -135,7 +131,6 @@ export const SchedulePageTemplate = {
             const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
             const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
             
-            // 假日只標紅字，不改背景色
             let thClass = isWeekend ? 'text-danger' : '';
             if (coverageErrors && coverageErrors[d]) thClass += ' bg-warning'; 
             
@@ -143,7 +138,13 @@ export const SchedulePageTemplate = {
                 ${d}<br><span style="font-size:0.8em">${weekStr}</span>
             </th>`;
         }
-        headerHtml += '</tr></thead>';
+        
+        // 右側統計欄位表頭
+        headerHtml += `<th class="sticky-col bg-light" style="min-width:40px;">OFF</th>
+                       <th class="sticky-col bg-light" style="min-width:40px;">假日</th>
+                       <th class="sticky-col bg-light" style="min-width:40px;">小夜</th>
+                       <th class="sticky-col bg-light" style="min-width:40px;">大夜</th>
+                       </tr></thead>`;
 
         // ========== 表身 Body ==========
         let bodyHtml = '<tbody>';
@@ -182,15 +183,12 @@ export const SchedulePageTemplate = {
                     </div>
                 </td>`;
 
-            // (A) 渲染上月最後 6 天（唯讀，灰色背景）
+            // (A) 渲染上月資料 (唯讀)
             if (prevMonthInfo && prevMonthInfo.displayDays) {
-                // 注意：這裡是 Body，可以使用 uid 讀取資料
                 const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
                 
                 prevMonthInfo.displayDays.forEach(day => {
                     const code = prevAssignments[day] || '';
-                    
-                    // 灰色背景，不區分假日，根據班別微調
                     let style = 'background-color: #e9ecef; color: #6c757d; opacity: 0.8;';
                     if (code === 'N') style = 'background-color: #495057; color: #fff; opacity: 0.6;';
                     else if (code === 'E') style = 'background-color: #ffc107; color: #000; opacity: 0.5;';
@@ -203,11 +201,33 @@ export const SchedulePageTemplate = {
                 });
             }
 
+            // 初始化個人統計
+            let countOFF = 0, countHolidayOFF = 0, countE = 0, countN = 0;
+
             // (B) 渲染本月日期
             for (let d = 1; d <= daysInMonth; d++) {
                 const code = staffAssignments[d] || '';
-                let style = '';
                 
+                // 1. 個人統計
+                const dateObj = new Date(year, month - 1, d);
+                const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                
+                if (code === 'OFF' || code === 'M_OFF') {
+                    countOFF++;
+                    if (isWeekend) countHolidayOFF++;
+                } else if (code === 'E') {
+                    countE++;
+                } else if (code === 'N') {
+                    countN++;
+                }
+
+                // 2. 全體統計 (累積)
+                if (dailyCounts[code]) {
+                    dailyCounts[code][d] = (dailyCounts[code][d] || 0) + 1;
+                }
+
+                // 3. 渲染儲存格
+                let style = '';
                 if(code === 'M_OFF') {
                     style = 'background-color:#6f42c1; color:white;';
                 } else if (code && shiftMap[code]) {
@@ -226,10 +246,50 @@ export const SchedulePageTemplate = {
                     ${code === 'M_OFF' ? 'OFF' : code}
                 </td>`;
             }
-            bodyHtml += '</tr>';
+            
+            // (C) 渲染右側統計
+            bodyHtml += `<td class="bg-white text-center fw-bold">${countOFF}</td>
+                         <td class="bg-white text-center fw-bold text-success">${countHolidayOFF}</td>
+                         <td class="bg-white text-center fw-bold text-warning-dark">${countE}</td>
+                         <td class="bg-white text-center fw-bold text-danger">${countN}</td>
+                         </tr>`;
         });
-        bodyHtml += '</tbody>';
+
+        // ========== 底部需求統計列 Stats Rows ==========
+        const staffReq = unitSettings.staffRequirements || {}; 
         
+        shiftDefs.forEach(shiftDef => {
+            const code = shiftDef.code;
+            const name = shiftDef.name;
+            
+            bodyHtml += `<tr class="stats-row" style="border-top: 2px solid #666;">
+                <td class="sticky-col bg-light fw-bold text-end pe-2" style="z-index:10;">${name}</td>`;
+                
+            // 上月補白
+            if (prevMonthInfo && prevMonthInfo.displayDays) {
+                prevMonthInfo.displayDays.forEach(() => bodyHtml += '<td class="bg-light"></td>');
+            }
+            
+            // 本月統計
+            for (let d = 1; d <= daysInMonth; d++) {
+                const date = new Date(year, month - 1, d);
+                const dayOfWeek = date.getDay();
+                
+                const required = staffReq[code]?.[dayOfWeek] || 0;
+                const assigned = dailyCounts[code] ? dailyCounts[code][d] : 0;
+                
+                let textClass = 'text-success';
+                if (assigned < required) textClass = 'text-danger fw-bold';
+                else if (assigned > required) textClass = 'text-primary';
+                
+                bodyHtml += `<td class="text-center small ${textClass}" style="background-color:#f8f9fa;">${assigned}/${required}</td>`;
+            }
+            
+            // 右側補白 (對應4個統計欄位)
+            bodyHtml += `<td class="bg-light"></td><td class="bg-light"></td><td class="bg-light"></td><td class="bg-light"></td></tr>`;
+        });
+
+        bodyHtml += '</tbody>';
         return `<table class="schedule-table table table-bordered table-sm text-center mb-0">${headerHtml}${bodyHtml}</table>`;
     },
 
