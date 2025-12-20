@@ -1021,13 +1021,12 @@ export class AutoScheduler {
         } else {
             context.logs.push(`ℹ️ Day ${day}: 日班次平衡未發生轉移`);
         }
-    }
-}
-
-    // =========================================================================
-    // 🔄 新增：Step 2C: 回溯性填補赤字
-    // =========================================================================
-    static step2C_RetroactiveDeficit(context, targetDay) {
+	    }
+	
+	    // =========================================================================
+	    // 🔄 新增：Step 2C: 回溯性填補赤字
+	    // =========================================================================
+	    static step2C_RetroactiveDeficit(context, targetDay) {
         const { staffList, assignments, staffReq } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, targetDay).getDay();
         const shifts = ['D', 'E', 'N'];
