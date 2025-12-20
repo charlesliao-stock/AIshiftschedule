@@ -101,8 +101,20 @@ export const SchedulePageTemplate = {
     },
 
     // 2. 渲染主表格 Grid
+export const SchedulePageTemplate = {
+    // 1. 主框架
+    renderLayout(year, month) {
+        // ... (保持原本內容)
+        return `
+            <div class="schedule-container">
+               <div id="schedule-grid-container" class="schedule-grid-wrapper border rounded"></div>
+               </div>
+        `;
+    },
+
+    // 2. 渲染主表格 Grid (核心修改)
     renderGrid(dataCtx, validationResult, options = {}) {
-        const { year, month, daysInMonth, staffList, unitSettings, preSchedule } = dataCtx;
+        const { year, month, daysInMonth, staffList, unitSettings, preSchedule, prevMonthInfo, previousMonthSchedule } = dataCtx;
         const assignments = dataCtx.scheduleData?.assignments || {};
         const { staffReport, coverageErrors } = validationResult;
         const { isInteractive = true, isDropZone = false, versionIdx = null } = options;
@@ -113,29 +125,52 @@ export const SchedulePageTemplate = {
         shiftMap['OFF'] = { color: '#e5e7eb', name: '休' };
         shiftMap['M_OFF'] = { color: '#6f42c1', name: '管休' };
 
+        // ========== 表頭 Header ==========
         let headerHtml = '<thead><tr><th class="sticky-col bg-light" style="min-width:140px; z-index:20;">人員 / 日期</th>';
+        
+        // (A) 渲染上月最後 6 天
+        if (prevMonthInfo && prevMonthInfo.displayDays) {
+            prevMonthInfo.displayDays.forEach(day => {
+                const dateObj = new Date(prevMonthInfo.year, prevMonthInfo.month - 1, day);
+                const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
+                
+                // 灰色背景，不區分假日
+                headerHtml += `<th class="bg-secondary text-white" style="min-width:40px; opacity: 0.7;">
+                    ${prevMonthInfo.month}/${day}<br><span style="font-size:0.8em">${weekStr}</span>
+                </th>`;
+            });
+        }
+        
+        // (B) 渲染本月日期
         for (let d = 1; d <= daysInMonth; d++) {
             const dateObj = new Date(year, month - 1, d);
             const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
-            let thClass = (dateObj.getDay()===0||dateObj.getDay()===6) ? 'text-danger' : '';
+            const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+            
+            // 假日只標紅字，不改背景色
+            let thClass = isWeekend ? 'text-danger' : '';
             if (coverageErrors && coverageErrors[d]) thClass += ' bg-warning'; 
-            headerHtml += `<th class="${thClass}" style="min-width:40px;">${d}<br><span style="font-size:0.8em">${weekStr}</span></th>`;
+            
+            headerHtml += `<th class="${thClass}" style="min-width:40px;">
+                ${d}<br><span style="font-size:0.8em">${weekStr}</span>
+            </th>`;
         }
         headerHtml += '</tr></thead>';
 
+        // ========== 表身 Body ==========
         let bodyHtml = '<tbody>';
         staffList.forEach(staff => {
             const uid = staff.uid;
             const staffAssignments = assignments[uid] || {};
             const staffErrors = staffReport[uid]?.errors || {};
             
-            // --- 狀態標籤生成邏輯 (與 SchedulePage.js 一致) ---
+            // 狀態標籤
             let statusBadges = '';
             if (staff.constraints?.isPregnant) statusBadges += '<span class="badge bg-danger ms-1 small">孕</span>';
             if (staff.constraints?.isPostpartum) statusBadges += '<span class="badge bg-warning text-dark ms-1 small">哺</span>';
             if (staff.constraints?.canBatch) statusBadges += '<span class="badge bg-info text-dark ms-1 small">包</span>';
             
-            // --- 預班備註 ---
+            // 預班備註
             let wishNote = '';
             if (preSchedule && preSchedule.submissions && preSchedule.submissions[uid]) {
                if(preSchedule.submissions[uid].notes) {
@@ -159,6 +194,27 @@ export const SchedulePageTemplate = {
                     </div>
                 </td>`;
 
+            // (A) 渲染上月最後 6 天（唯讀，灰色背景）
+            if (prevMonthInfo && prevMonthInfo.displayDays) {
+                const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
+                
+                prevMonthInfo.displayDays.forEach(day => {
+                    const code = prevAssignments[day] || '';
+                    
+                    // 灰色背景，不區分假日，根據班別微調
+                    let style = 'background-color: #e9ecef; color: #6c757d; opacity: 0.8;';
+                    if (code === 'N') style = 'background-color: #495057; color: #fff; opacity: 0.6;';
+                    else if (code === 'E') style = 'background-color: #ffc107; color: #000; opacity: 0.5;';
+                    else if (code === 'D') style = 'background-color: #d1e7dd; color: #0f5132; opacity: 0.6;';
+                    else if (code === 'OFF' || code === 'M_OFF') style = 'background-color: #f0f0f0; color: #999; opacity: 0.7;';
+                    
+                    bodyHtml += `<td style="${style}" title="上月 ${day} 日 (唯讀)">
+                        <span style="font-size: 0.85rem;">${code === 'M_OFF' ? 'OFF' : code}</span>
+                    </td>`;
+                });
+            }
+
+            // (B) 渲染本月日期
             for (let d = 1; d <= daysInMonth; d++) {
                 const code = staffAssignments[d] || '';
                 let style = '';
@@ -176,11 +232,15 @@ export const SchedulePageTemplate = {
                 const cursor = isInteractive ? 'cursor:pointer;' : '';
                 const dropAttrs = isDropZone ? `ondragover="event.preventDefault()" ondrop="window.routerPage.handleDrop(event, '${uid}', ${d}, ${versionIdx})"` : '';
 
-                bodyHtml += `<td class="${cellClass}" data-staff-id="${uid}" data-day="${d}" style="${cursor} ${style}; ${borderStyle}" ${title} ${dropAttrs}>${code === 'M_OFF' ? 'OFF' : code}</td>`;
+                bodyHtml += `<td class="${cellClass}" data-staff-id="${uid}" data-day="${d}" 
+                    style="${cursor} ${style}; ${borderStyle}" ${title} ${dropAttrs}>
+                    ${code === 'M_OFF' ? 'OFF' : code}
+                </td>`;
             }
             bodyHtml += '</tr>';
         });
         bodyHtml += '</tbody>';
+        
         return `<table class="schedule-table table table-bordered table-sm text-center mb-0">${headerHtml}${bodyHtml}</table>`;
     },
 
