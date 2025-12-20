@@ -9,7 +9,9 @@ export class AutoScheduler {
         const startTime = Date.now();
 
         try {
-            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData);
+            // 提取上月資料 (如果有)
+            const prevMonthData = preScheduleData?.prevAssignments || {};
+            const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, prevMonthData);
 
             // 🎯 子步驟 1：準備工作
             this.step1_Preparation(context);
@@ -54,7 +56,7 @@ export class AutoScheduler {
     // 🛠️ 初始化
     // =========================================================================
 
-    static prepareContext(schedule, staffList, unitSettings, preSchedule) {
+    static prepareContext(schedule, staffList, unitSettings, preSchedule, prevMonthData = {}) {
         const assignments = {};
         const stats = {};
         const preferences = {}; 
@@ -64,12 +66,30 @@ export class AutoScheduler {
         staffList.forEach(staff => {
             const uid = staff.uid;
             assignments[uid] = {};
+            
+            // 計算上月結尾的連續上班天數
+            let prevConsecutive = 0;
+            let lastShift = 'OFF';
+            
+            if (prevMonthData[uid]) {
+                const days = Object.keys(prevMonthData[uid]).map(Number).sort((a, b) => b - a);
+                for (const d of days) {
+                    const s = prevMonthData[uid][d];
+                    if (['D', 'E', 'N'].includes(s)) {
+                        prevConsecutive++;
+                    } else {
+                        break;
+                    }
+                }
+                if (days.length > 0) lastShift = prevMonthData[uid][days[0]];
+            }
+
             stats[uid] = { 
                 OFF: 0, 
-                consecutive: 0,
-                lastShift: null,
+                consecutive: prevConsecutive,
+                lastShift: lastShift,
                 weekendShifts: 0,
-                shiftTypes: new Set()  // ✅ v2.5 新增：追踪班别种类
+                shiftTypes: new Set()
             };
             
             allShifts.forEach(s => stats[uid][s] = 0);
@@ -356,10 +376,12 @@ export class AutoScheduler {
         }));
         deficits.sort((a, b) => b.deficit - a.deficit);
 
-        // 規則1：將已放OFF >= 平均休假天數的員工，調整為缺額班別
+        // 規則1：將已放OFF > 平均休假天數的員工，調整為缺額班別 (增加人力)
+        // 這裡稍微放寬條件，只要比平均多就考慮調整，以達到平衡
         const eligibleStaff = offStaff.filter(uid => {
             const currentOff = stats[uid].OFF;
-            return currentOff >= context.avgLeaveTarget;
+            // 如果目前 OFF 已經比目標多，或者在月中之後 OFF 比例過高，就優先調整
+            return currentOff > context.avgLeaveTarget;
         });
 
         // 按已放OFF降序排序（休最多的優先調整）
@@ -518,7 +540,7 @@ export class AutoScheduler {
         
         console.log("  📊 階段 1: 平衡 OFF 總數");
         
-        const maxIterations = 5;
+        const maxIterations = 10; // 增加迭代次數
         for (let iteration = 0; iteration < maxIterations; iteration++) {
             let swapCount = 0;
             
@@ -533,7 +555,8 @@ export class AutoScheduler {
             
             console.log(`    第 ${iteration + 1} 輪: 平均 OFF=${avgOff.toFixed(1)}, 標準差=${stdOff.toFixed(2)}`);
             
-            if (stdOff < 1.5) {
+            // 降低標準差門檻，追求更極致的平衡
+            if (stdOff < 0.8) {
                 console.log("    ✅ OFF 平衡度已達標");
                 break;
             }
@@ -555,10 +578,12 @@ export class AutoScheduler {
                     for (const freeUser of underworked) {
                         if (busyUser.uid === freeUser.uid) continue;
                         
+                        // 只有當 freeUser 這天是 OFF 時，才考慮把 busyUser 的班換給他
                         if (assignments[freeUser.uid][d] !== 'OFF' || this.isLocked(context, freeUser.uid, d)) {
                             continue;
                         }
                         
+                        // 檢查交換後是否會違反連六規則
                         if (this.canSwap(context, busyUser.uid, freeUser.uid, d, shift)) {
                             this.assign(context, busyUser.uid, d, 'OFF');
                             this.assign(context, freeUser.uid, d, shift);
@@ -813,18 +838,29 @@ export class AutoScheduler {
             }
         }
         
-        let consecutive = 0;
-        for (let d = day - 1; d >= 1; d--) {
+        // 檢查 uid2 (接收班別的人) 是否會連六
+        let consecutiveBefore = 0;
+        for (let d = day - 1; d >= day - 7; d--) {
             const s = this.getShift(context, uid2, d);
             if (['D','E','N'].includes(s)) {
-                consecutive++;
+                consecutiveBefore++;
+            } else {
+                break;
+            }
+        }
+        
+        let consecutiveAfter = 0;
+        for (let d = day + 1; d <= day + 7; d++) {
+            const s = this.getShift(context, uid2, d);
+            if (['D','E','N'].includes(s)) {
+                consecutiveAfter++;
             } else {
                 break;
             }
         }
         
         const maxCons = staff2.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
-        if (consecutive >= maxCons) {
+        if (consecutiveBefore + 1 + consecutiveAfter > maxCons) {
             return false;
         }
         
@@ -876,7 +912,16 @@ export class AutoScheduler {
     }
 
     static getShift(context, uid, day) {
-        if (day < 1) return 'OFF'; 
+        if (day < 1) {
+            // 嘗試從 context 中獲取上月班別
+            const prevMonthData = context.wishes?.prevAssignments || {};
+            if (prevMonthData[uid]) {
+                const daysInPrevMonth = new Date(context.year, context.month - 1, 0).getDate();
+                const targetDay = daysInPrevMonth + day; // day 是 0, -1, -2...
+                return prevMonthData[uid][targetDay] || 'OFF';
+            }
+            return 'OFF';
+        }
         return context.assignments[uid]?.[day] || null;
     }
 
