@@ -68,7 +68,8 @@ export class AutoScheduler {
                 consecutive: 0,
                 lastShift: null,
                 weekendShifts: 0,
-                shiftTypes: new Set()  // ✅ v2.5 新增：追踪班别种类
+                shiftTypes: new Set(),  // ✅ v2.5 新增：追踪班别种类
+                earlyMonthOffTaken: false // ✅ 新增：追踪月初 6 天內是否已排 OFF
             };
             
             allShifts.forEach(s => stats[uid][s] = 0);
@@ -156,11 +157,20 @@ export class AutoScheduler {
             blankList.push({ staff, whitelist });
         }
 
-        this.fillBlanks(context, day, blankList);
-        
-        // 新增：日班次平衡 (超額轉缺額)
-        this.balanceDailyShifts(context, day);
-    }
+	        this.fillBlanks(context, day, blankList);
+	        
+	        // 規則 2 修正：檢查並更新 earlyMonthOffTaken 狀態
+	        if (day <= 6) {
+	            staffList.forEach(staff => {
+	                if (this.getShift(context, staff.uid, day) === 'OFF') {
+	                    context.stats[staff.uid].earlyMonthOffTaken = true;
+	                }
+	            });
+	        }
+	        
+	        // 新增：日班次平衡 (超額轉缺額)
+	        this.balanceDailyShifts(context, day);
+	    }
 
     static checkPreSchedule(context, staff, day) {
         const wishes = context.wishes[staff.uid]?.wishes || {};
@@ -168,10 +178,14 @@ export class AutoScheduler {
 
         if (!wish) return false; 
 
-        if (wish === 'OFF' || wish === 'M_OFF') {
-            this.assign(context, staff.uid, day, 'OFF');
-            return true;
-        }
+	        if (wish === 'OFF' || wish === 'M_OFF') {
+	            this.assign(context, staff.uid, day, 'OFF');
+	            // 規則 2 修正：預排 OFF 視為已休息
+	            if (day <= 6) {
+	                context.stats[staff.uid].earlyMonthOffTaken = true;
+	            }
+	            return true;
+	        }
 
         // 1. 檢查連續上班天數 (對應規則 1.2)
         const maxCons = staff.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
@@ -179,11 +193,15 @@ export class AutoScheduler {
         const willBeConsecutive = currentConsecutive + 1;
 
         if (willBeConsecutive > maxCons) {
-            // 如果超過最大連續天數，則強制排 OFF，並忽略預班指定
-            this.assign(context, staff.uid, day, 'OFF');
-            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反連班規則 (${willBeConsecutive}天)，強制 OFF`);
-            return true;
-        }
+	            // 如果超過最大連續天數，則強制排 OFF，並忽略預班指定
+	            this.assign(context, staff.uid, day, 'OFF');
+	            // 規則 2 修正：強制 OFF 視為已休息
+	            if (day <= 6) {
+	                context.stats[staff.uid].earlyMonthOffTaken = true;
+	            }
+	            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反連班規則 (${willBeConsecutive}天)，強制 OFF`);
+	            return true;
+	        }
 
         // 2. 檢查間隔時間 (對應規則 1.3)
         const prevShift = this.getShift(context, staff.uid, day - 1);
@@ -207,11 +225,11 @@ export class AutoScheduler {
         const isEarlyMonth = day <= 6;
         const prevShift = this.getShift(context, staff.uid, day - 1);
         
-        // 檢查是否已在月初休息過 (簡單標記：前一天是 OFF 且在月初 6 天內)
-        const hasTakenEarlyMonthOff = isEarlyMonth && prevShift === 'OFF';
+        // 檢查是否已在月初休息過 (使用狀態追蹤)
+        const hasTakenEarlyMonthOff = context.stats[staff.uid].earlyMonthOffTaken;
 
         // ---------------------------------------------------------------------
-        // 規則 2.2.1: 月初 6 天內，順接上個月的班，以滿足人力需求為主
+        // 規則 2.2.1: 月初 6 天內，且尚未休息過，則優先順接前班
         // ---------------------------------------------------------------------
         if (isEarlyMonth && !hasTakenEarlyMonthOff) {
             // 順接上個月的班 (即前一天是上班班次)
@@ -221,11 +239,11 @@ export class AutoScheduler {
                 context.logs.push(`  ${staff.name} Day ${day}: 月初順接前班 (${prevShift}) 模式，白名單: ${list.join(', ')}`);
                 return list;
             }
-            // 如果前一天是 OFF，則進入正常邏輯，但會被 hasTakenEarlyMonthOff 標記
+            // 如果前一天是 OFF，則進入正常邏輯，但會在 step2A 中被標記為已休息
         }
         
         // ---------------------------------------------------------------------
-        // 規則 2.2.2: OFF 後的班次需要配合同仁的排班偏好 (或非月初)
+        // 規則 2.2.2: 已休息過 (hasTakenEarlyMonthOff) 或非月初，則恢復偏好過濾
         // ---------------------------------------------------------------------
         
         // 孕哺限制 (規則 2.2)
