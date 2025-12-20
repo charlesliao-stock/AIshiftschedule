@@ -101,18 +101,6 @@ export const SchedulePageTemplate = {
     },
 
     // 2. 渲染主表格 Grid
-export const SchedulePageTemplate = {
-    // 1. 主框架
-    renderLayout(year, month) {
-        // ... (保持原本內容)
-        return `
-            <div class="schedule-container">
-               <div id="schedule-grid-container" class="schedule-grid-wrapper border rounded"></div>
-               </div>
-        `;
-    },
-
-    // 2. 渲染主表格 Grid (核心修改)
     renderGrid(dataCtx, validationResult, options = {}) {
         const { year, month, daysInMonth, staffList, unitSettings, preSchedule, prevMonthInfo, previousMonthSchedule } = dataCtx;
         const assignments = dataCtx.scheduleData?.assignments || {};
@@ -128,27 +116,20 @@ export const SchedulePageTemplate = {
         // ========== 表頭 Header ==========
         let headerHtml = '<thead><tr><th class="sticky-col bg-light" style="min-width:140px; z-index:20;">人員 / 日期</th>';
         
-// (A) 渲染上月最後 6 天（唯讀，灰色背景）
-            if (prevMonthInfo && prevMonthInfo.displayDays) {  // ⬅️ 這裡必須要有大括號
-                const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
+        // (A) 渲染上月最後 6 天 (表頭)
+        if (prevMonthInfo && prevMonthInfo.displayDays) {
+            prevMonthInfo.displayDays.forEach(day => {
+                const dateObj = new Date(prevMonthInfo.year, prevMonthInfo.month - 1, day);
+                const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
                 
-                prevMonthInfo.displayDays.forEach(day => {
-                    const code = prevAssignments[day] || '';
-                    
-                    // 灰色背景，不區分假日，根據班別微調
-                    let style = 'background-color: #e9ecef; color: #6c757d; opacity: 0.8;';
-                    if (code === 'N') style = 'background-color: #495057; color: #fff; opacity: 0.6;';
-                    else if (code === 'E') style = 'background-color: #ffc107; color: #000; opacity: 0.5;';
-                    else if (code === 'D') style = 'background-color: #d1e7dd; color: #0f5132; opacity: 0.6;';
-                    else if (code === 'OFF' || code === 'M_OFF') style = 'background-color: #f0f0f0; color: #999; opacity: 0.7;';
-                    
-                    bodyHtml += `<td style="${style}" title="上月 ${day} 日 (唯讀)">
-                        <span style="font-size: 0.85rem;">${code === 'M_OFF' ? 'OFF' : code}</span>
-                    </td>`;
-                });
-            } // ⬅️ 記得閉合大括號
+                // 灰色背景，不區分假日
+                headerHtml += `<th class="bg-secondary text-white" style="min-width:40px; opacity: 0.7;">
+                    ${prevMonthInfo.month}/${day}<br><span style="font-size:0.8em">${weekStr}</span>
+                </th>`;
+            });
+        }
         
-        // (B) 渲染本月日期
+        // (B) 渲染本月日期 (表頭)
         for (let d = 1; d <= daysInMonth; d++) {
             const dateObj = new Date(year, month - 1, d);
             const weekStr = ['日','一','二','三','四','五','六'][dateObj.getDay()];
@@ -203,6 +184,7 @@ export const SchedulePageTemplate = {
 
             // (A) 渲染上月最後 6 天（唯讀，灰色背景）
             if (prevMonthInfo && prevMonthInfo.displayDays) {
+                // 注意：這裡是 Body，可以使用 uid 讀取資料
                 const prevAssignments = previousMonthSchedule?.assignments?.[uid] || {};
                 
                 prevMonthInfo.displayDays.forEach(day => {
