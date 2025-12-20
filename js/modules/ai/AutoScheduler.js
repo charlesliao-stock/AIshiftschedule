@@ -160,6 +160,18 @@ export class AutoScheduler {
         });
 
         for (const staff of sortedStaff) {
+            // ✅ 規則 0：強制硬規則檢查 - 若已連上 6 天，直接給 OFF
+            const currentConsecutive = context.stats[staff.uid].consecutive;
+            const maxCons = staff.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
+            
+            if (currentConsecutive >= maxCons) {
+                // 除非預班已經指定了班別（預班優先），否則強制給 OFF
+                if (!this.isLocked(context, staff.uid, day)) {
+                    this.assign(context, staff.uid, day, 'OFF');
+                    continue;
+                }
+            }
+
             if (this.checkPreSchedule(context, staff, day)) continue;
 
             let whitelist = this.generateWhitelist(context, staff);
