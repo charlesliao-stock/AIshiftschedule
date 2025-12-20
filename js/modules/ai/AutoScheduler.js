@@ -543,7 +543,65 @@ export class AutoScheduler {
         // 階段 5：優化偏好滿足度
         this.optimizePreferences(context);
         
-        console.log("✅ v2.5 全月平衡完成");
+        // ✅ 最終防線：硬規則糾錯層
+        this.enforceHardRules(context);
+        
+        console.log("✅ v3.0 全月平衡與硬規則糾錯完成");
+    }
+
+    /**
+     * 最終防線：強制執行硬規則 (連六)
+     * 掃描全月，若發現連七，強制將第七天改為 OFF (除非是預班鎖定)
+     */
+    static enforceHardRules(context) {
+        const { staffList, assignments, daysInMonth } = context;
+        console.log("  🛡️ 階段 6: 強制執行硬規則 (連六糾錯)");
+        
+        staffList.forEach(staff => {
+            let consecutive = 0;
+            
+            // 包含上月結尾
+            const prevMonthData = context.wishes?.prevAssignments || {};
+            if (prevMonthData[staff.uid]) {
+                const days = Object.keys(prevMonthData[staff.uid]).map(Number).sort((a, b) => b - a);
+                for (const d of days) {
+                    if (['D', 'E', 'N'].includes(prevMonthData[staff.uid][d])) consecutive++;
+                    else break;
+                }
+            }
+            
+            const maxCons = staff.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
+            
+            for (let d = 1; d <= daysInMonth; d++) {
+                const s = assignments[staff.uid][d];
+                if (['D', 'E', 'N'].includes(s)) {
+                    consecutive++;
+                    if (consecutive > maxCons) {
+                        // 違反連六！強制改為 OFF
+                        // 優先改這一天，除非這天被預班鎖定，則嘗試改前一天
+                        if (!this.isLocked(context, staff.uid, d)) {
+                            console.log(`    [糾錯] ${staff.name} 第 ${d} 天連 ${consecutive}，強制改 OFF`);
+                            this.assign(context, staff.uid, d, 'OFF');
+                            consecutive = 0;
+                        } else {
+                            // 如果當天鎖定，往前找一天沒鎖定的改 OFF
+                            for (let prevD = d - 1; prevD >= 1; prevD--) {
+                                if (!this.isLocked(context, staff.uid, prevD) && ['D', 'E', 'N'].includes(assignments[staff.uid][prevD])) {
+                                    console.log(`    [糾錯] ${staff.name} 第 ${d} 天連 ${consecutive}，回溯第 ${prevD} 天強制改 OFF`);
+                                    this.assign(context, staff.uid, prevD, 'OFF');
+                                    // 重新掃描該員工
+                                    d = 0; 
+                                    consecutive = 0;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    consecutive = 0;
+                }
+            }
+        });
     }
     
     // 階段 1：平衡 OFF 總數
@@ -850,31 +908,40 @@ export class AutoScheduler {
             }
         }
         
-        // 檢查 uid2 (接收班別的人) 是否會連六
-        let consecutiveBefore = 0;
-        for (let d = day - 1; d >= day - 7; d--) {
-            const s = this.getShift(context, uid2, d);
-            if (['D','E','N'].includes(s)) {
-                consecutiveBefore++;
-            } else {
-                break;
-            }
-        }
+        // ✅ 強化檢查：模擬交換後，掃描全月是否會違反連六規則
+        const originalShift = context.assignments[uid2][day];
+        context.assignments[uid2][day] = shift; // 暫時模擬
         
-        let consecutiveAfter = 0;
-        for (let d = day + 1; d <= day + 7; d++) {
-            const s = this.getShift(context, uid2, d);
-            if (['D','E','N'].includes(s)) {
-                consecutiveAfter++;
-            } else {
-                break;
+        let isValid = true;
+        let consecutive = 0;
+        
+        // 包含上月結尾的連續天數
+        const prevMonthData = context.wishes?.prevAssignments || {};
+        if (prevMonthData[uid2]) {
+            const days = Object.keys(prevMonthData[uid2]).map(Number).sort((a, b) => b - a);
+            for (const d of days) {
+                if (['D', 'E', 'N'].includes(prevMonthData[uid2][d])) consecutive++;
+                else break;
             }
         }
         
         const maxCons = staff2.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
-        if (consecutiveBefore + 1 + consecutiveAfter > maxCons) {
-            return false;
+        
+        for (let d = 1; d <= context.daysInMonth; d++) {
+            const s = context.assignments[uid2][d];
+            if (['D', 'E', 'N'].includes(s)) {
+                consecutive++;
+                if (consecutive > maxCons) {
+                    isValid = false;
+                    break;
+                }
+            } else {
+                consecutive = 0;
+            }
         }
+        
+        context.assignments[uid2][day] = originalShift; // 還原
+        if (!isValid) return false;
         
         return whitelist.includes(shift);
     }
@@ -898,9 +965,6 @@ export class AutoScheduler {
         const oldShift = context.assignments[uid][day];
         if (oldShift) {
             context.stats[uid][oldShift]--;
-            if (['D','E','N'].includes(oldShift)) {
-                context.stats[uid].shiftTypes.delete(oldShift);
-            }
         }
 
         context.assignments[uid][day] = shift;
@@ -908,19 +972,57 @@ export class AutoScheduler {
         if (!context.stats[uid][shift]) context.stats[uid][shift] = 0;
         context.stats[uid][shift]++;
 
-        if (shift === 'OFF' || shift === 'M_OFF') {
-            context.stats[uid].consecutive = 0;
-        } else {
-            context.stats[uid].consecutive++;
-            if (['D','E','N'].includes(shift)) {
-                context.stats[uid].shiftTypes.add(shift);
+        // ✅ 核心修正：重新計算該員工的全月統計數據，確保連續上班天數與班別種類永遠正確
+        this.recalculateStaffStats(context, uid);
+    }
+
+    /**
+     * 重新計算單一員工的全月統計數據
+     */
+    static recalculateStaffStats(context, uid) {
+        const stats = context.stats[uid];
+        const assignments = context.assignments[uid];
+        const daysInMonth = context.daysInMonth;
+        
+        // 重置部分統計
+        stats.OFF = 0;
+        stats.shiftTypes = new Set();
+        ['D', 'E', 'N'].forEach(s => stats[s] = 0);
+        
+        // 獲取上月結尾的連續上班天數作為起點
+        let currentConsecutive = 0;
+        const prevMonthData = context.wishes?.prevAssignments || {};
+        if (prevMonthData[uid]) {
+            const days = Object.keys(prevMonthData[uid]).map(Number).sort((a, b) => b - a);
+            for (const d of days) {
+                if (['D', 'E', 'N'].includes(prevMonthData[uid][d])) currentConsecutive++;
+                else break;
             }
         }
         
-        // ✅ v2.5 验证：检查班别种类数
-        if (context.stats[uid].shiftTypes.size > 2) {
-            console.warn(`⚠️ ${uid} 班别种类超过 2 种: ${Array.from(context.stats[uid].shiftTypes).join(', ')}`);
+        // 逐日掃描當月
+        for (let d = 1; d <= daysInMonth; d++) {
+            const s = assignments[d];
+            if (!s) continue;
+            
+            if (s === 'OFF' || s === 'M_OFF') {
+                stats.OFF++;
+                currentConsecutive = 0;
+            } else if (['D', 'E', 'N'].includes(s)) {
+                stats[s]++;
+                stats.shiftTypes.add(s);
+                currentConsecutive++;
+            }
+            
+            // 這裡更新的是「當前掃描到這一天」的連續天數
+            // 為了讓 Step 2A 能拿到正確的「昨天為止的連續天數」，我們需要特別處理
+            if (d === Object.keys(assignments).length) {
+                stats.consecutive = currentConsecutive;
+            }
         }
+        
+        // 如果全月都排完了，確保最後的 consecutive 是正確的
+        stats.consecutive = currentConsecutive;
     }
 
     static getShift(context, uid, day) {
