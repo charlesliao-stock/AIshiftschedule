@@ -952,9 +952,7 @@ export class AutoScheduler {
                 map[s.code].end += 1440;
             }
         });
-        if (!map['D']) map['D'] = { start: 480, end: 960 };
-        if (!map['E']) map['E'] = { start: 960, end: 1440 };
-        if (!map['N']) map['N'] = { start: 0, end: 480 };
+        // 移除硬編碼的預設值，強制從 settings.shifts 讀取
         return map;
     }
 
