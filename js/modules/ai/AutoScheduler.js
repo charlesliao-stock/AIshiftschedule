@@ -5,19 +5,19 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, previousMonthAssignments = {}, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動 (v2.6 決策紀錄版): 策略 ${strategyCode}`);
+        console.log(`🚀 AI 排班啟動 (v2.5 夜班類型限制版): 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
             const context = this.prepareContext(currentSchedule, staffList, unitSettings, preScheduleData, previousMonthAssignments);
 
-            // 🎯 子步驟 1：準備工作
+            // 🎯 子步驟 1:準備工作
             this.step1_Preparation(context);
 
-            // 🔄 逐日排班
+            // 📄 逐日排班
             for (let day = 1; day <= context.daysInMonth; day++) {
                 if (Date.now() - startTime > MAX_RUNTIME) {
-                    context.logs.push("⚠️ 運算超時，提前結束");
+                    context.logs.push("⚠️ 運算超時,提前結束");
                     break;
                 }
 
@@ -29,19 +29,19 @@ export class AutoScheduler {
                 this.step2A_ScheduleToday(context, day);
             }
 
-            // 🎯 子步驟 3：月底收尾與最終平衡
+            // 🎯 子步驟 3:月底收尾與最終平衡
             if (context.daysInMonth > 0) {
                 this.step2B_RetroactiveOFF(context, context.daysInMonth);
                 this.step3_Finalize(context);
                 
-                // ✅ v2.5 強化版：多階段全月總平衡
+                // ✅ v2.5 強化版:多階段全月總平衡
                 this.enhancedGlobalBalance(context);
             }
 
             return {
                 assignments: context.assignments,
                 logs: context.logs,
-                decisions: context.decisions // ✨ 回傳決策地圖
+                debugLogs: context.debugLogs // 新增:返回詳細除錯日誌
             };
 
         } catch (error) {
@@ -56,7 +56,6 @@ export class AutoScheduler {
 
     static prepareContext(schedule, staffList, unitSettings, preSchedule, previousMonthAssignments) {
         const assignments = {};
-        const decisions = {}; // ✨ 新增：決策紀錄容器
         const stats = {};
         const preferences = {}; 
         
@@ -65,7 +64,6 @@ export class AutoScheduler {
         staffList.forEach(staff => {
             const uid = staff.uid;
             assignments[uid] = {};
-            decisions[uid] = {}; // ✨ 初始化每個人的決策紀錄
             stats[uid] = { 
                 OFF: 0, 
                 consecutive: 0,
@@ -81,7 +79,6 @@ export class AutoScheduler {
             for (let d = -6; d < 0; d++) {
                 if (previousMonthAssignments[uid] && previousMonthAssignments[uid][d]) {
                     assignments[uid][d] = previousMonthAssignments[uid][d];
-                    decisions[uid][d] = "上月延續"; // 標記上個月的班
                 }
             }
 
@@ -94,7 +91,6 @@ export class AutoScheduler {
             month: schedule.month,
             daysInMonth: new Date(schedule.year, schedule.month, 0).getDate(),
             assignments,
-            decisions, // ✨ 放入 context
             staffList,
             stats,
             preferences, 
@@ -103,10 +99,90 @@ export class AutoScheduler {
             settings: unitSettings.settings || {},
             rules: unitSettings.rules || {},
             logs: [],
+            debugLogs: [], // 新增:詳細除錯日誌
             totalManDays: 0,
             avgLeaveTarget: 0,
             dailyLeaveQuotas: {}
         };
+    }
+
+    // =========================================================================
+    // 🔍 新增:除錯日誌記錄器
+    // =========================================================================
+    
+    static logDebug(context, day, stage, message, data = {}) {
+        // 只記錄前7天
+        if (day > 7) return;
+        
+        const logEntry = {
+            day,
+            stage,
+            message,
+            timestamp: new Date().toISOString(),
+            ...data
+        };
+        
+        context.debugLogs.push(logEntry);
+        
+        // 同時在控制台輸出
+        console.log(`[Debug Day ${day}] ${stage}: ${message}`, data);
+    }
+    
+    static logStaffState(context, day, staff, stage) {
+        if (day > 7) return;
+        
+        const uid = staff.uid;
+        const stats = context.stats[uid];
+        const currentShift = context.assignments[uid][day];
+        const prevShift = this.getShift(context, uid, day - 1);
+        
+        this.logDebug(context, day, stage, `員工狀態: ${staff.name}`, {
+            uid,
+            name: staff.name,
+            currentShift,
+            prevShift,
+            stats: {
+                OFF: stats.OFF,
+                D: stats.D || 0,
+                E: stats.E || 0,
+                N: stats.N || 0,
+                consecutive: stats.consecutive,
+                weekendShifts: stats.weekendShifts,
+                earlyMonthOffTaken: stats.earlyMonthOffTaken,
+                shiftTypes: Array.from(stats.shiftTypes)
+            }
+        });
+    }
+    
+    static logDailyRequirements(context, day) {
+        if (day > 7) return;
+        
+        const dayOfWeek = new Date(context.year, context.month - 1, day).getDay();
+        const shifts = ['D', 'E', 'N'];
+        const requirements = {};
+        const currentCounts = {};
+        
+        shifts.forEach(shift => {
+            requirements[shift] = context.staffReq[shift]?.[dayOfWeek] || 0;
+            currentCounts[shift] = 0;
+            
+            Object.keys(context.assignments).forEach(uid => {
+                if (context.assignments[uid][day] === shift) {
+                    currentCounts[shift]++;
+                }
+            });
+        });
+        
+        this.logDebug(context, day, '每日需求統計', '當日班次需求與實際人數', {
+            dayOfWeek: ['日', '一', '二', '三', '四', '五', '六'][dayOfWeek],
+            requirements,
+            currentCounts,
+            differences: {
+                D: currentCounts.D - requirements.D,
+                E: currentCounts.E - requirements.E,
+                N: currentCounts.N - requirements.N
+            }
+        });
     }
 
     // =========================================================================
@@ -136,13 +212,31 @@ export class AutoScheduler {
         for (let d = 1; d <= daysInMonth; d++) {
             context.dailyLeaveQuotas[d] = staffCount - dailyReq[d];
         }
+        
+        // 記錄準備階段的統計資料
+        if (daysInMonth >= 7) {
+            this.logDebug(context, 1, '準備階段', '初始化統計', {
+                staffCount,
+                daysInMonth,
+                totalManDays,
+                totalReqDays,
+                totalLeaveQuota,
+                avgLeaveTarget: context.avgLeaveTarget,
+                first7DaysQuotas: Object.fromEntries(
+                    Object.entries(context.dailyLeaveQuotas).slice(0, 7)
+                )
+            });
+        }
     }
 
     // =========================================================================
-    // 🔄 Step 2A: 排今天的班
+    // 📄 Step 2A: 排今天的班
     // =========================================================================
     static step2A_ScheduleToday(context, day) {
         const { staffList } = context;
+        
+        this.logDebug(context, day, '開始排班', `=== Day ${day} 排班開始 ===`);
+        
         const blankList = []; 
 
         const sortedStaff = [...staffList].sort((a, b) => {
@@ -150,17 +244,50 @@ export class AutoScheduler {
             const offB = context.stats[b.uid].OFF;
             return offA - offB;
         });
+        
+        if (day <= 7) {
+            this.logDebug(context, day, '排班順序', '員工按休假天數排序', {
+                staffOrder: sortedStaff.map(s => ({
+                    name: s.name,
+                    OFF: context.stats[s.uid].OFF
+                }))
+            });
+        }
 
         for (const staff of sortedStaff) {
-            if (this.checkPreSchedule(context, staff, day)) continue;
+            this.logDebug(context, day, '處理員工', `開始處理 ${staff.name}`);
+            
+            if (this.checkPreSchedule(context, staff, day)) {
+                this.logStaffState(context, day, staff, '預排完成');
+                continue;
+            }
 
             let whitelist = this.generateWhitelist(context, staff, day);
+            this.logDebug(context, day, '白名單生成', `${staff.name} 初始白名單`, {
+                whitelist
+            });
+            
             whitelist = this.filterWhitelistRules(context, staff, day, whitelist);
+            this.logDebug(context, day, '規則過濾', `${staff.name} 過濾後白名單`, {
+                whitelist
+            });
 
-            if (this.tryContinuePreviousShift(context, staff, day, whitelist)) continue;
+            if (this.tryContinuePreviousShift(context, staff, day, whitelist)) {
+                this.logDebug(context, day, '順接班次', `${staff.name} 成功順接前一天班次`);
+                this.logStaffState(context, day, staff, '順接完成');
+                continue;
+            }
 
             blankList.push({ staff, whitelist });
+            this.logDebug(context, day, '加入空白列表', `${staff.name} 加入待填補列表`, {
+                whitelist
+            });
         }
+        
+        this.logDebug(context, day, '填補空白', `開始填補 ${blankList.length} 個空白`, {
+            blankCount: blankList.length,
+            blankStaff: blankList.map(b => b.staff.name)
+        });
 
         this.fillBlanks(context, day, blankList);
         
@@ -173,8 +300,19 @@ export class AutoScheduler {
             });
         }
         
+        // 記錄當日需求統計
+        this.logDailyRequirements(context, day);
+        
         // 日班次平衡 (超額轉缺額)
         this.balanceDailyShifts(context, day);
+        
+        // 記錄當日最終狀態
+        if (day <= 7) {
+            this.logDebug(context, day, '排班完成', `=== Day ${day} 排班結束 ===`);
+            staffList.forEach(staff => {
+                this.logStaffState(context, day, staff, '當日最終狀態');
+            });
+        }
     }
 
     static checkPreSchedule(context, staff, day) {
@@ -182,12 +320,15 @@ export class AutoScheduler {
         const wish = wishes[day];
 
         if (!wish) return false; 
+        
+        this.logDebug(context, day, '檢查預排', `${staff.name} 有預排: ${wish}`);
 
         if (wish === 'OFF' || wish === 'M_OFF') {
-            this.assign(context, staff.uid, day, 'OFF', `預班指定 (${wish})`);
+            this.assign(context, staff.uid, day, 'OFF');
             if (day <= 6) {
                 context.stats[staff.uid].earlyMonthOffTaken = true;
             }
+            this.logDebug(context, day, '預排生效', `${staff.name} 預排 OFF 生效`);
             return true;
         }
 
@@ -197,21 +338,34 @@ export class AutoScheduler {
         const willBeConsecutive = currentConsecutive + 1;
 
         if (willBeConsecutive > maxCons) {
-            this.assign(context, staff.uid, day, 'OFF', `預班 ${wish} 違反連班規則 (${willBeConsecutive}天)，強制 OFF`);
+            this.assign(context, staff.uid, day, 'OFF');
             if (day <= 6) {
                 context.stats[staff.uid].earlyMonthOffTaken = true;
             }
-            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反連班規則 (${willBeConsecutive}天)，強制 OFF`);
+            this.logDebug(context, day, '預排違規', `${staff.name} 預排 ${wish} 違反連班規則`, {
+                currentConsecutive,
+                willBeConsecutive,
+                maxCons
+            });
+            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反連班規則 (${willBeConsecutive}天),強制 OFF`);
             return true;
         }
 
         // 檢查間隔時間
         const prevShift = this.getShift(context, staff.uid, day - 1);
         if (RuleEngine.checkShiftInterval(prevShift, wish, this.getShiftMap(context.settings), 660)) {
-            this.assign(context, staff.uid, day, wish, `預班指定 (${wish})`);
+            this.assign(context, staff.uid, day, wish);
+            this.logDebug(context, day, '預排生效', `${staff.name} 預排 ${wish} 生效`, {
+                prevShift,
+                intervalCheck: 'PASS'
+            });
             return true;
         } else {
-            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反間隔規則 (前: ${prevShift})，進入一般排班`);
+            this.logDebug(context, day, '預排違規', `${staff.name} 預排 ${wish} 違反間隔規則`, {
+                prevShift,
+                intervalCheck: 'FAIL'
+            });
+            context.logs.push(`⚠️ ${staff.name} Day ${day}: 預班 ${wish} 違反間隔規則 (前: ${prevShift}),進入一般排班`);
             return false; 
         }
     }
@@ -225,11 +379,15 @@ export class AutoScheduler {
         const prevShift = this.getShift(context, staff.uid, day - 1);
         const hasTakenEarlyMonthOff = context.stats[staff.uid].earlyMonthOffTaken;
 
-        // 規則 2.2.1: 月初 6 天內，且尚未休息過，則優先順接前班
+        // 規則 2.2.1: 月初 6 天內,且尚未休息過,則優先順接前班
         if (isEarlyMonth && !hasTakenEarlyMonthOff) {
             if (['D', 'E', 'N'].includes(prevShift)) {
                 list = list.filter(s => s === prevShift || s === 'OFF');
-                context.logs.push(`  ${staff.name} Day ${day}: 月初順接前班 (${prevShift}) 模式，白名單: ${list.join(', ')}`);
+                this.logDebug(context, day, '月初順接', `${staff.name} 月初順接模式`, {
+                    prevShift,
+                    newWhitelist: list
+                });
+                context.logs.push(`  ${staff.name} Day ${day}: 月初順接前班 (${prevShift}) 模式,白名單: ${list.join(', ')}`);
                 return list;
             }
         }
@@ -237,6 +395,9 @@ export class AutoScheduler {
         // 孕哺限制
         if (constraints.isPregnant || constraints.isPostpartum) {
             list = list.filter(s => s !== 'N' && s !== 'E'); 
+            this.logDebug(context, day, '孕哺限制', `${staff.name} 孕哺限制`, {
+                newWhitelist: list
+            });
         }
 
         // 根據包班設定過濾
@@ -249,18 +410,18 @@ export class AutoScheduler {
 
         if (isEOnly) {
             list = list.filter(s => s === 'E' || s === 'OFF');
-            context.logs.push(`  ${staff.name}: 依偏好設定為包小夜，白名單: E, OFF`);
+            context.logs.push(`  ${staff.name}: 依偏好設定為包小夜,白名單: E, OFF`);
         } else if (isNOnly) {
             list = list.filter(s => s === 'N' || s === 'OFF');
-            context.logs.push(`  ${staff.name}: 依偏好設定為包大夜，白名單: N, OFF`);
+            context.logs.push(`  ${staff.name}: 依偏好設定為包大夜,白名單: N, OFF`);
         } else if ((p1 === 'D' || p2 === 'D' || p3 === 'D') && (p1 === 'E' || p2 === 'E' || p3 === 'E')) {
             list = list.filter(s => s === 'D' || s === 'E' || s === 'OFF');
-            context.logs.push(`  ${staff.name}: 依偏好設定為 D+E，白名單: D, E, OFF`);
+            context.logs.push(`  ${staff.name}: 依偏好設定為 D+E,白名單: D, E, OFF`);
         } else if ((p1 === 'D' || p2 === 'D' || p3 === 'D') && (p1 === 'N' || p2 === 'N' || p3 === 'N')) {
             list = list.filter(s => s === 'D' || s === 'N' || s === 'OFF');
-            context.logs.push(`  ${staff.name}: 依偏好設定為 D+N，白名單: D, N, OFF`);
+            context.logs.push(`  ${staff.name}: 依偏好設定為 D+N,白名單: D, N, OFF`);
         } else {
-            // 一般情況：平衡度檢查
+            // 一般情況:平衡度檢查
             const preferred = ['OFF'];
             
             if (p1 && list.includes(p1)) {
@@ -303,9 +464,13 @@ export class AutoScheduler {
         const maxCons = staff.constraints?.maxConsecutive || context.rules.maxWorkDays || 6;
         const currentConsecutive = context.stats[staff.uid].consecutive;
         
-        return whitelist.filter(shift => {
+        const filtered = whitelist.filter(shift => {
             // 檢查 11 小時間隔
             if (!RuleEngine.checkShiftInterval(prevShift, shift, shiftMap, 660)) {
+                this.logDebug(context, day, '規則過濾', `${staff.name} ${shift} 被過濾 (間隔不足)`, {
+                    prevShift,
+                    shift
+                });
                 return false;
             }
             
@@ -315,6 +480,10 @@ export class AutoScheduler {
                 
                 if (willBeConsecutive > maxCons) {
                     if (willBeConsecutive === maxCons + 1 && context.rules.allowConsecutive7) {
+                        this.logDebug(context, day, '規則過濾', `${staff.name} ${shift} 連續天數達上限`, {
+                            willBeConsecutive,
+                            maxCons
+                        });
                         return shift === 'OFF';
                     }
                     return false;
@@ -323,18 +492,23 @@ export class AutoScheduler {
             
             // 檢查大夜前置
             if (shift === 'N' && prevShift !== 'OFF' && prevShift !== 'N' && context.rules.preNightOff) {
+                this.logDebug(context, day, '規則過濾', `${staff.name} N 被過濾 (需前置休)`, {
+                    prevShift
+                });
                 return false;
             }
             
             return true;
         });
+        
+        return filtered;
     }
 
     static tryContinuePreviousShift(context, staff, day, whitelist) {
         const prevShift = this.getShift(context, staff.uid, day - 1);
         
         if (['D', 'E', 'N'].includes(prevShift) && whitelist.includes(prevShift)) {
-            this.assign(context, staff.uid, day, prevShift, `延續前日班別 (${prevShift})`);
+            this.assign(context, staff.uid, day, prevShift);
             return true;
         }
         return false;
@@ -358,7 +532,12 @@ export class AutoScheduler {
             });
         });
         
-        // 優先處理包班員工，其次休假多的優先
+        this.logDebug(context, day, '填補前統計', '當前班次統計', {
+            required,
+            currentCounts
+        });
+        
+        // ✅ 修正:優先處理包班員工,其次休假多的優先
         const sortedBlanks = [...blankList].sort((a, b) => {
             const aIsPackage = a.whitelist.includes('E') && !a.whitelist.includes('D') || 
                                a.whitelist.includes('N') && !a.whitelist.includes('D');
@@ -368,7 +547,7 @@ export class AutoScheduler {
             if (aIsPackage && !bIsPackage) return -1;
             if (!aIsPackage && bIsPackage) return 1;
             
-            // 休假多的優先
+            // ✅ 修正:休假多的優先
             return context.stats[b.staff.uid].OFF - context.stats[a.staff.uid].OFF;
         });
         
@@ -380,27 +559,39 @@ export class AutoScheduler {
                 .filter(shift => whitelist.includes(shift) && currentCounts[shift] < required[shift])
                 .sort((a, b) => (required[b] - currentCounts[b]) - (required[a] - currentCounts[a]));
             
+            this.logDebug(context, day, '填補決策', `${staff.name} 評估缺額班次`, {
+                deficitShifts,
+                whitelist
+            });
+            
             for (const shift of deficitShifts) {
-                this.assign(context, staff.uid, day, shift, `填補缺額 (優先順序高)`);
+                this.assign(context, staff.uid, day, shift);
                 currentCounts[shift]++;
                 assigned = true;
+                this.logDebug(context, day, '填補成功', `${staff.name} 分配到 ${shift} (缺額)`);
                 break;
             }
             
             if (!assigned) {
                 if (whitelist.includes('OFF')) {
-                    this.assign(context, staff.uid, day, 'OFF', `無合適缺額/輪空自動 OFF`);
+                    this.assign(context, staff.uid, day, 'OFF');
+                    this.logDebug(context, day, '填補成功', `${staff.name} 分配到 OFF (無缺額)`);
                 } else {
-                    this.assign(context, staff.uid, day, 'OFF', `無缺額且無法排班 強制 OFF`);
+                    this.assign(context, staff.uid, day, 'OFF');
+                    this.logDebug(context, day, '填補失敗', `${staff.name} 強制 OFF (白名單無 OFF)`);
                 }
             }
         }
     }
 
     // =========================================================================
-    // 🔄 Step 2B: 回溯標記 OFF
+    // 📄 Step 2B: 回溯標記 OFF
     // =========================================================================
     static step2B_RetroactiveOFF(context, targetDay) {
+        if (targetDay > 7) return; // 只記錄前7天
+        
+        this.logDebug(context, targetDay, '回溯OFF開始', `檢查 Day ${targetDay} 超額情況`);
+        
         const { staffList, assignments, dailyLeaveQuotas } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, targetDay).getDay();
         const shifts = ['D', 'E', 'N'];
@@ -423,14 +614,25 @@ export class AutoScheduler {
             overstaffedCount += Math.max(0, currentCounts[shift] - required[shift]);
         });
         
-        if (overstaffedCount === 0) return;
+        this.logDebug(context, targetDay, '回溯OFF統計', '超額統計', {
+            required,
+            currentCounts,
+            overstaffedCount
+        });
+        
+        if (overstaffedCount === 0) {
+            this.logDebug(context, targetDay, '回溯OFF結束', '無超額,跳過');
+            return;
+        }
         
         // 確定可回溯標記 OFF 的配額
-        const availableLeaveQuota = dailyLeaveQuotas[targetDay] - context.stats.totalOFF; // 注意：stats.totalOFF 需維護或忽略
-        // 這裡假設 dailyLeaveQuotas 夠用，簡化處理
-        const retroactiveOffQuota = Math.min(overstaffedCount, dailyLeaveQuotas[targetDay] || 0); 
+        const availableLeaveQuota = dailyLeaveQuotas[targetDay] - context.stats.totalOFF;
+        const retroactiveOffQuota = Math.min(overstaffedCount, availableLeaveQuota);
         
-        if (retroactiveOffQuota <= 0) return;
+        if (retroactiveOffQuota <= 0) {
+            this.logDebug(context, targetDay, '回溯OFF結束', '配額不足,跳過');
+            return;
+        }
         
         // 找出所有超額班次的員工
         let candidates = [];
@@ -440,7 +642,7 @@ export class AutoScheduler {
                 
                 const eligibleStaff = staffUids.filter(uid => !this.isLocked(context, uid, targetDay));
                 
-                // 優先選擇休假天數較少的員工
+                // ✅ 優先選擇休假天數較少的員工
                 eligibleStaff.sort((a, b) => context.stats[a].OFF - context.stats[b].OFF);
                 
                 // 排除上1休1模式
@@ -458,19 +660,34 @@ export class AutoScheduler {
             }
         });
         
+        this.logDebug(context, targetDay, '回溯OFF候選', '候選員工', {
+            candidatesCount: candidates.length,
+            candidates: candidates.map(c => ({
+                uid: c.uid,
+                shift: c.shift,
+                currentOFF: context.stats[c.uid].OFF
+            }))
+        });
+        
         // 執行回溯標記 OFF
         let count = retroactiveOffQuota;
         
-        // 再次排序：休假少的優先
+        // ✅ 再次排序:休假少的優先
         candidates.sort((a, b) => context.stats[a.uid].OFF - context.stats[b.uid].OFF);
         
         for (const { uid, shift } of candidates) {
             if (count <= 0) break;
             
-            this.assign(context, uid, targetDay, 'OFF', `回溯修正: 人力過剩轉 OFF`);
+            this.assign(context, uid, targetDay, 'OFF');
+            this.logDebug(context, targetDay, '回溯OFF執行', `${uid} 標記為 OFF`, {
+                originalShift: shift,
+                newShift: 'OFF'
+            });
             context.logs.push(`✅ Day ${targetDay}: ${uid} (${shift}) 標記為 OFF (回溯)`);
             count--;
         }
+        
+        this.logDebug(context, targetDay, '回溯OFF完成', `共標記 ${retroactiveOffQuota - count} 人`);
     }
 
     // =========================================================================
@@ -481,7 +698,7 @@ export class AutoScheduler {
         staffList.forEach(staff => {
             for (let d = 1; d <= daysInMonth; d++) {
                 if (!assignments[staff.uid][d]) {
-                    this.assign(context, staff.uid, d, 'OFF', `月底收尾補齊 OFF`);
+                    this.assign(context, staff.uid, d, 'OFF');
                 }
             }
         });
@@ -549,8 +766,8 @@ export class AutoScheduler {
                         }
                         
                         if (this.canSwap(context, manyOffUser.uid, fewOffUser.uid, d, shift)) {
-                            this.assign(context, fewOffUser.uid, d, 'OFF', `全月優化: 增加休假 (與 ${manyOffUser.uid} 交換)`);
-                            this.assign(context, manyOffUser.uid, d, shift, `全月優化: 減少休假 (與 ${fewOffUser.uid} 交換)`);
+                            this.assign(context, fewOffUser.uid, d, 'OFF');
+                            this.assign(context, manyOffUser.uid, d, shift);
                             swapCount++;
                             swappedThisUser = true;
                             break;
@@ -581,7 +798,7 @@ export class AutoScheduler {
         });
         
         if (eligibleStaff.length === 0) {
-            console.log(`    ⚠️ 沒有員工偏好${shiftName}班，跳過`);
+            console.log(`    ⚠️ 沒有員工偏好${shiftName}班,跳過`);
             return;
         }
         
@@ -630,8 +847,8 @@ export class AutoScheduler {
                         if (this.canSwap(context, fewUser.uid, manyUser.uid, d, shiftType) &&
                             this.canSwap(context, manyUser.uid, fewUser.uid, d, shift)) {
                             
-                            this.assign(context, fewUser.uid, d, shiftType, `全月優化: 平衡${shiftName} (增加)`);
-                            this.assign(context, manyUser.uid, d, shift, `全月優化: 平衡${shiftName} (減少)`);
+                            this.assign(context, fewUser.uid, d, shiftType);
+                            this.assign(context, manyUser.uid, d, shift);
                             swapCount++;
                             swappedThisUser = true;
                             break;
@@ -666,7 +883,6 @@ export class AutoScheduler {
             const stdWeekend = Math.sqrt(weekendStats.reduce((sum, s) => sum + Math.pow(s.weekendCount - avgWeekend, 2), 0) / weekendStats.length);
             
             console.log(`    第 ${iteration + 1} 輪: 平均假日=${avgWeekend.toFixed(1)}, 標準差=${stdWeekend.toFixed(2)}`);
-            
             if (stdWeekend < 1.0) {
                 console.log("    ✅ 假日班次平衡度已達標");
                 break;
@@ -701,8 +917,8 @@ export class AutoScheduler {
                         }
                         
                         if (this.canSwap(context, fewUser.uid, manyUser.uid, d, manyShift)) {
-                            this.assign(context, fewUser.uid, d, manyShift, `全月優化: 增加假日班`);
-                            this.assign(context, manyUser.uid, d, 'OFF', `全月優化: 減少假日班`);
+                            this.assign(context, fewUser.uid, d, manyShift);
+                            this.assign(context, manyUser.uid, d, 'OFF');
                             swapCount++;
                             swappedThisUser = true;
                             break;
@@ -752,8 +968,8 @@ export class AutoScheduler {
                     if (otherShift === p1 && otherP1 !== p1 && !this.isLocked(context, other.uid, mismatch.day)) {
                         if (this.canSwap(context, staff.uid, other.uid, mismatch.day, p1) &&
                             this.canSwap(context, other.uid, staff.uid, mismatch.day, mismatch.shift)) {
-                            this.assign(context, staff.uid, mismatch.day, p1, `全月優化: 滿足偏好 (${p1})`);
-                            this.assign(context, other.uid, mismatch.day, mismatch.shift, `全月優化: 交換以滿足他人偏好`);
+                            this.assign(context, staff.uid, mismatch.day, p1);
+                            this.assign(context, other.uid, mismatch.day, mismatch.shift);
                             optimizeCount++;
                             break;
                         }
@@ -810,7 +1026,7 @@ export class AutoScheduler {
         return whitelist.includes(shift);
     }
 
-    static assign(context, uid, day, shift, reason = null) {
+    static assign(context, uid, day, shift) {
         const oldShift = context.assignments[uid][day];
         if (oldShift) {
             context.stats[uid][oldShift]--;
@@ -845,12 +1061,6 @@ export class AutoScheduler {
         if (context.stats[uid].shiftTypes.size > 2) {
             console.warn(`⚠️ ${uid} 班別種類超過 2 種: ${Array.from(context.stats[uid].shiftTypes).join(', ')}`);
         }
-
-        // ✨ 決策紀錄：如果有提供理由，則寫入
-        if (reason) {
-            if (!context.decisions[uid]) context.decisions[uid] = {};
-            context.decisions[uid][day] = reason;
-        }
     }
 
     static getShift(context, uid, day) {
@@ -879,9 +1089,13 @@ export class AutoScheduler {
     }
 
     // =========================================================================
-    // 🔄 日班次平衡 (超額轉缺額)
+    // 📄 日班次平衡 (超額轉缺額)
     // =========================================================================
     static balanceDailyShifts(context, day) {
+        if (day > 7) return; // 只記錄前7天
+        
+        this.logDebug(context, day, '日班次平衡開始', '檢查班次分配');
+        
         const { assignments, staffReq } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, day).getDay();
         const shifts = ['D', 'E', 'N'];
@@ -911,9 +1125,17 @@ export class AutoScheduler {
             }
         });
         
-        if (overstaffed.length === 0 || understaffed.length === 0) return;
+        this.logDebug(context, day, '日班次平衡統計', '超額與缺額', {
+            overstaffed,
+            understaffed
+        });
         
-        context.logs.push(`🔄 Day ${day}: 啟動日班次平衡。超額: ${overstaffed.map(o => `${o.shift}(+${o.diff})`).join(', ')}，缺額: ${understaffed.map(u => `${u.shift}(-${u.diff})`).join(', ')}`);
+        if (overstaffed.length === 0 || understaffed.length === 0) {
+            this.logDebug(context, day, '日班次平衡結束', '無需平衡');
+            return;
+        }
+        
+        context.logs.push(`🔄 Day ${day}: 啟動日班次平衡。超額: ${overstaffed.map(o => `${o.shift}(+${o.diff})`).join(', ')},缺額: ${understaffed.map(u => `${u.shift}(-${u.diff})`).join(', ')}`);
         
         let balanceCount = 0;
         
@@ -926,15 +1148,20 @@ export class AutoScheduler {
                     return this.canSwap(context, uid, uid, day, under.shift);
                 });
                 
-                // 優先選擇休假天數較多的員工
+                // ✅ 修正:優先選擇休假天數較多的員工
                 candidates.sort((a, b) => context.stats[b].OFF - context.stats[a].OFF);
                 
                 const transfers = Math.min(over.diff, under.diff, candidates.length);
                 
+                this.logDebug(context, day, '日班次平衡執行', `從 ${over.shift} 轉 ${under.shift}`, {
+                    candidatesCount: candidates.length,
+                    transfers
+                });
+                
                 for (let i = 0; i < transfers; i++) {
                     const uid = candidates[i];
                     
-                    this.assign(context, uid, day, under.shift, `當日平衡: ${over.shift} 轉 ${under.shift}`);
+                    this.assign(context, uid, day, under.shift);
                     
                     over.diff--;
                     under.diff--;
@@ -946,14 +1173,19 @@ export class AutoScheduler {
         }
         
         if (balanceCount > 0) {
-            context.logs.push(`✅ Day ${day}: 日班次平衡完成，共轉移 ${balanceCount} 人次`);
+            this.logDebug(context, day, '日班次平衡完成', `共轉移 ${balanceCount} 人次`);
+            context.logs.push(`✅ Day ${day}: 日班次平衡完成,共轉移 ${balanceCount} 人次`);
         }
     }
 
     // =========================================================================
-    // 🔄 Step 2C: 回溯性填補赤字
+    // 📄 Step 2C: 回溯性填補赤字
     // =========================================================================
     static step2C_RetroactiveDeficit(context, targetDay) {
+        if (targetDay > 7) return; // 只記錄前7天
+        
+        this.logDebug(context, targetDay, '回溯填補開始', `檢查 Day ${targetDay} 赤字情況`);
+        
         const { staffList, assignments, staffReq } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, targetDay).getDay();
         const shifts = ['D', 'E', 'N'];
@@ -977,7 +1209,15 @@ export class AutoScheduler {
             }
         });
         
-        if (totalDeficit === 0) return;
+        this.logDebug(context, targetDay, '回溯填補統計', '赤字統計', {
+            deficitShifts,
+            totalDeficit
+        });
+        
+        if (totalDeficit === 0) {
+            this.logDebug(context, targetDay, '回溯填補結束', '無赤字,跳過');
+            return;
+        }
         
         context.logs.push(`🔄 Day ${targetDay}: 啟動回溯性填補赤字。赤字: ${deficitShifts.map(d => `${d.shift}(-${d.deficit})`).join(', ')}`);
         
@@ -991,8 +1231,16 @@ export class AutoScheduler {
             return true;
         });
         
-        // 優先選擇休假天數較多的員工
+        // ✅ 優先選擇休假天數較多的員工
         candidates.sort((a, b) => context.stats[b.uid].OFF - context.stats[a.uid].OFF);
+        
+        this.logDebug(context, targetDay, '回溯填補候選', '候選員工', {
+            candidatesCount: candidates.length,
+            candidates: candidates.slice(0, 5).map(s => ({
+                name: s.name,
+                OFF: context.stats[s.uid].OFF
+            }))
+        });
         
         let fillCount = 0;
         
@@ -1013,12 +1261,17 @@ export class AutoScheduler {
                 if (!whitelist.includes(targetShift)) continue;
                 
                 if (this.canSwap(context, uid, uid, targetDay, targetShift)) {
-                    this.assign(context, uid, targetDay, targetShift, `回溯修正: 填補赤字 (${targetShift})`);
+                    this.assign(context, uid, targetDay, targetShift);
                     
                     deficit.deficit--;
                     totalDeficit--;
                     fillCount++;
                     assigned = true;
+                    
+                    this.logDebug(context, targetDay, '回溯填補執行', `${staff.name} 填補為 ${targetShift}`, {
+                        originalShift: 'OFF',
+                        newShift: targetShift
+                    });
                     
                     context.logs.push(`✅ Day ${targetDay}: ${staff.name} (OFF) 回溯填補為 ${targetShift} (赤字)`);
                     break;
@@ -1027,7 +1280,8 @@ export class AutoScheduler {
         }
         
         if (fillCount > 0) {
-            context.logs.push(`✅ Day ${targetDay}: 回溯性填補赤字完成，共填補 ${fillCount} 人次`);
+            this.logDebug(context, targetDay, '回溯填補完成', `共填補 ${fillCount} 人次`);
+            context.logs.push(`✅ Day ${targetDay}: 回溯性填補赤字完成,共填補 ${fillCount} 人次`);
         }
     }
 }
