@@ -67,9 +67,13 @@ class AuthService {
             return;
         }
 
-        // 如果目前沒有真實 Profile，或者傳入的是系統管理員，則更新真實 Profile
-        // 這是為了確保在重新整理頁面後，我們仍知道誰是「真實的」管理員
-        if (!this.currentUserProfile || profile.role === 'system_admin') {
+        // 關鍵修正：只有當傳入的是真正的系統管理員，且目前沒有真實 Profile 時才設定
+        // 或者如果傳入的是系統管理員，我們就更新它（以防資料變動）
+        if (profile.role === 'system_admin') {
+            this.currentUserProfile = profile;
+            localStorage.setItem('realProfile', JSON.stringify(profile));
+        } else if (!this.currentUserProfile) {
+            // 如果不是管理員，且目前沒有真實 Profile，才設定（一般使用者登入）
             this.currentUserProfile = profile;
             localStorage.setItem('realProfile', JSON.stringify(profile));
         }

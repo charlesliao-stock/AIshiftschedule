@@ -13,15 +13,19 @@ export class UnitManagerDashboard {
     }
 
     async render() {
-        // 只要真實身分是系統管理員，就顯示模擬控制台
-        const realProfile = authService.currentUserProfile;
-        const showConsole = (realProfile?.role === 'system_admin' || this.isImpersonating);
+        // 只要真實身分是系統管理員，或者正在模擬中，就顯示模擬控制台
+        const isImpersonating = !!localStorage.getItem('impersonatedProfile');
+        const realProfile = JSON.parse(localStorage.getItem('realProfile') || '{}');
+        const showConsole = (realProfile?.role === 'system_admin' || isImpersonating);
+        
         return DashboardTemplate.renderManager(this.isImpersonating, showConsole);
     }
 
     async afterRender() {
-        const realProfile = authService.currentUserProfile;
-        if (realProfile?.role === 'system_admin' || this.isImpersonating) {
+        const isImpersonating = !!localStorage.getItem('impersonatedProfile');
+        const realProfile = JSON.parse(localStorage.getItem('realProfile') || '{}');
+        
+        if (realProfile?.role === 'system_admin' || isImpersonating) {
             await SystemAdminDashboard.initImpersonationConsole(this);
         }
 
