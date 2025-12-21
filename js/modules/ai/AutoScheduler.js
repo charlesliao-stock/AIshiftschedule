@@ -5,7 +5,7 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動 (v4.2 最佳解評分版): 策略 ${strategyCode}`);
+        console.log(`🚀 AI 排班啟動 (v4.3 效能優化版): 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
@@ -21,11 +21,14 @@ export class AutoScheduler {
                     break;
                 }
 
+                // ✅ 關鍵修正：每處理一天，讓出執行緒 0 毫秒 (避免 UI 卡死)
+                await new Promise(resolve => setTimeout(resolve, 0));
+
                 // 1. 基礎排班
                 this.cycle1_BasicAssignment(context, day);
 
-                // 2. 智慧填補缺口 (核心修正)
-                this.cycle2_SmartFill(context, day);
+                // 2. 智慧填補缺口 (async 呼叫)
+                await this.cycle2_SmartFill(context, day);
 
                 // 3. 修剪超額
                 this.cycle3_TrimExcess(context, day);
@@ -78,7 +81,6 @@ export class AutoScheduler {
             const prevShift = this.getShift(context, uid, day - 1);
 
             if (prevShift === 'OFF' || prevShift === 'M_OFF') {
-                // 前一天 OFF，優先填缺口
                 const currentCounts = this.getCurrentCounts(context, day);
                 const gaps = ['D', 'E', 'N']
                     .map(s => ({ shift: s, gap: targetCounts[s] - currentCounts[s] }))
@@ -91,7 +93,6 @@ export class AutoScheduler {
                     this.assign(context, uid, day, 'OFF');
                 }
             } else {
-                // 前一天上班，優先延續
                 if (whitelist.includes(prevShift)) {
                     this.assign(context, uid, day, prevShift);
                 } else {
@@ -112,9 +113,9 @@ export class AutoScheduler {
     }
 
     // =========================================================================
-    // 🧠 Cycle 2: 智慧填補缺口 (Smart Fill) - v4.2 核心
+    // 🧠 Cycle 2: 智慧填補缺口 (Smart Fill) - v4.3 優化版
     // =========================================================================
-    static cycle2_SmartFill(context, day) {
+    static async cycle2_SmartFill(context, day) {
         const { staffList, staffReq } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, day).getDay();
         const targetCounts = {
@@ -123,56 +124,51 @@ export class AutoScheduler {
             N: staffReq['N']?.[dayOfWeek] || 0
         };
 
-        // 限制最大迭代次數，防止無窮迴圈 (例如設為人數的 1.5 倍)
         const maxIterations = staffList.length + 10; 
         
         for (let iter = 0; iter < maxIterations; iter++) {
-            // 1. 掃描當前狀態
+            // ✅ 優化：每執行 5 次運算，暫停一下讓路給瀏覽器
+            if (iter % 5 === 0) {
+                await new Promise(r => setTimeout(r, 0));
+            }
+
             const currentCounts = this.getCurrentCounts(context, day);
             const gaps = ['D', 'E', 'N'].filter(s => targetCounts[s] > currentCounts[s]);
             const surpluses = ['D', 'E', 'N'].filter(s => currentCounts[s] > targetCounts[s]);
 
-            // 如果沒有缺口，直接收工
             if (gaps.length === 0) break;
 
-            // 2. 收集所有候選移動方案 (Candidate Moves)
             const candidates = [];
-
-            // --- 策略 A: 從 OFF 直接補 (Direct Fill) ---
             const offStaff = staffList.filter(s => 
                 !this.isLocked(context, s.uid, day) && 
                 context.assignments[s.uid][day] === 'OFF'
             );
 
+            // --- 策略 A: 直接填補 ---
             for (const staff of offStaff) {
                 let whitelist = this.generateWhitelist(context, staff);
                 whitelist = this.filterWhitelistRules(context, staff, day, whitelist);
-
                 for (const targetShift of gaps) {
                     if (whitelist.includes(targetShift)) {
                         candidates.push({
                             type: 'DIRECT',
                             staff: staff,
                             targetShift: targetShift,
-                            // 分數公式：基礎分 100 + 該員工 Total OFF (假越多越優先)
                             score: 100 + context.stats[staff.uid].totalOff
                         });
                     }
                 }
             }
 
-            // --- 策略 B: 從超額班別調度 (Win-Win Swap) ---
-            // 優先度最高，因為同時解決 Gap 和 Surplus
+            // --- 策略 B: 超額調度 ---
             for (const sourceShift of surpluses) {
                 const sourceStaff = staffList.filter(s => 
                     !this.isLocked(context, s.uid, day) && 
                     context.assignments[s.uid][day] === sourceShift
                 );
-
                 for (const staff of sourceStaff) {
                     let whitelist = this.generateWhitelist(context, staff);
                     whitelist = this.filterWhitelistRules(context, staff, day, whitelist);
-
                     for (const targetShift of gaps) {
                         if (whitelist.includes(targetShift)) {
                             candidates.push({
@@ -180,7 +176,6 @@ export class AutoScheduler {
                                 staff: staff,
                                 targetShift: targetShift,
                                 sourceShift: sourceShift,
-                                // 分數公式：基礎分 200 (比 Direct 高) + Total OFF
                                 score: 200 + context.stats[staff.uid].totalOff
                             });
                         }
@@ -188,35 +183,27 @@ export class AutoScheduler {
                 }
             }
 
-            // --- 策略 C: 連鎖補位 (Chain Reaction) ---
-            // A去B(填缺口)，C(OFF)去A(補空位)
-            // 只有當無法直接填補時才使用，且來源班別必須「不缺人」
+            // --- 策略 C: 連鎖補位 ---
             for (const targetShift of gaps) {
                 const validSourceShifts = ['D', 'E', 'N'].filter(s => 
                     s !== targetShift && 
-                    currentCounts[s] >= targetCounts[s] // 來源至少要滿員
+                    currentCounts[s] >= targetCounts[s] 
                 );
-
                 for (const sourceShift of validSourceShifts) {
-                    // 找出中間人 (Switcher): Source -> Target
                     const potentialSwitchers = staffList.filter(s => 
                         !this.isLocked(context, s.uid, day) &&
                         context.assignments[s.uid][day] === sourceShift
                     );
-
-                    // 找出救援者 (Reliever): OFF -> Source
                     const potentialRelievers = offStaff; 
 
                     for (const switcher of potentialSwitchers) {
                         let wSwitcher = this.generateWhitelist(context, switcher);
                         wSwitcher = this.filterWhitelistRules(context, switcher, day, wSwitcher);
-                        
                         if (!wSwitcher.includes(targetShift)) continue;
 
                         for (const reliever of potentialRelievers) {
                             let wReliever = this.generateWhitelist(context, reliever);
                             wReliever = this.filterWhitelistRules(context, reliever, day, wReliever);
-
                             if (!wReliever.includes(sourceShift)) continue;
 
                             candidates.push({
@@ -225,7 +212,6 @@ export class AutoScheduler {
                                 reliever: reliever,
                                 targetShift: targetShift,
                                 sourceShift: sourceShift,
-                                // 分數公式：基礎分 50 (最低) + 兩人 Total OFF 的平均
                                 score: 50 + (context.stats[switcher.uid].totalOff + context.stats[reliever.uid].totalOff) / 2
                             });
                         }
@@ -233,51 +219,37 @@ export class AutoScheduler {
                 }
             }
 
-            // 3. 決策：選擇最佳方案執行
+            // 決策
             if (candidates.length === 0) {
-                // 如果沒有任何方案，嘗試最後一招：找連上3天的人硬調 (Consecutive Swap)
-                // 這是在沒有 OFF 人員可用時的下下策
                 const panicMove = this.getConsecutivePanicMove(context, day, gaps, surpluses);
                 if (panicMove) {
                     this.assign(context, panicMove.staff.uid, day, panicMove.targetShift);
-                    // console.log(`  🔥 [Panic] 強制調動 ${panicMove.staff.name}`);
                     continue;
                 } else {
-                    break; // 真的沒招了，結束
+                    break; 
                 }
             }
 
-            // 依分數高到低排序
             candidates.sort((a, b) => b.score - a.score);
-            const bestMove = candidates[0]; // 取第一名
+            const bestMove = candidates[0]; 
 
-            // 4. 執行最佳方案
             if (bestMove.type === 'DIRECT') {
                 this.assign(context, bestMove.staff.uid, day, bestMove.targetShift);
-                // console.log(`  ✅ [Direct] ${bestMove.staff.name} OFF -> ${bestMove.targetShift}`);
             } 
             else if (bestMove.type === 'SWAP_SURPLUS') {
                 this.assign(context, bestMove.staff.uid, day, bestMove.targetShift);
-                // console.log(`  ♻️ [Swap] ${bestMove.staff.name} ${bestMove.sourceShift} -> ${bestMove.targetShift}`);
             } 
             else if (bestMove.type === 'CHAIN') {
                 this.assign(context, bestMove.switcher.uid, day, bestMove.targetShift);
                 this.assign(context, bestMove.reliever.uid, day, bestMove.sourceShift);
-                // console.log(`  🔗 [Chain] ${bestMove.switcher.name}轉${bestMove.targetShift}, ${bestMove.reliever.name}補${bestMove.sourceShift}`);
             }
-
-            // 執行完一次後，迴圈會回到開頭 (iter++)
-            // 重新計算 counts, gaps, surpluses，根據新局勢找下一個最佳解
         }
     }
 
     // 輔助：當正常招數都無效時，找連上3天的人 (Panic Mode)
     static getConsecutivePanicMove(context, day, gaps, surpluses) {
-        // 如果連 Surplus 都沒有，就不能調了
         if (surpluses.length === 0) return null;
-
         const { staffList } = context;
-        
         for (const sourceShift of surpluses) {
             const candidates = staffList.filter(s => {
                 if (this.isLocked(context, s.uid, day)) return false;
@@ -285,29 +257,19 @@ export class AutoScheduler {
                 const cons = this.getConsecutiveDaysFromOff(context, s.uid, day, sourceShift);
                 return cons >= 3;
             });
-            
-            // 隨機選一個
             if (candidates.length > 0) {
                 const staff = candidates[Math.floor(Math.random() * candidates.length)];
                 let whitelist = this.generateWhitelist(context, staff);
                 whitelist = this.filterWhitelistRules(context, staff, day, whitelist);
-                
-                // 找一個他能去的 Gap
                 const validGaps = gaps.filter(g => whitelist.includes(g));
                 if (validGaps.length > 0) {
-                    return {
-                        staff: staff,
-                        targetShift: validGaps[0]
-                    };
+                    return { staff: staff, targetShift: validGaps[0] };
                 }
             }
         }
         return null;
     }
 
-    // =========================================================================
-    // 🔄 Cycle 3: 修剪超額 (找假少的人去休假)
-    // =========================================================================
     static cycle3_TrimExcess(context, day) {
         const { staffList, staffReq } = context;
         const dayOfWeek = new Date(context.year, context.month - 1, day).getDay();
@@ -329,7 +291,6 @@ export class AutoScheduler {
                 context.assignments[s.uid][day] === shift
             );
 
-            // 排序：Total OFF 由少到多 (假少的人優先去休假)
             staffInShift.sort((a, b) => context.stats[a.uid].totalOff - context.stats[b.uid].totalOff);
 
             for (const staff of staffInShift) {
@@ -362,7 +323,7 @@ export class AutoScheduler {
                 D: 0, E: 0, N: 0,
                 OFF: 0,
                 preOffCount: preOffCount,
-                totalOff: preOffCount, // Init with pre-schedule OFFs
+                totalOff: preOffCount, 
             };
 
             const sub = preSchedule?.submissions?.[uid];
@@ -409,7 +370,6 @@ export class AutoScheduler {
         if (['D', 'E', 'N'].includes(shift)) context.stats[uid][shift]++;
         if (shift === 'OFF') context.stats[uid].OFF++;
         
-        // 即時更新 Total OFF
         context.stats[uid].totalOff = context.stats[uid].OFF + context.stats[uid].preOffCount;
     }
 
