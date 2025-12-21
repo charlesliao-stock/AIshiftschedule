@@ -4,7 +4,10 @@ import { firebaseService } from "./FirebaseService.js";
 class AuthService {
     constructor() { 
         this.currentUser = null;        // Firebase Auth User
-        this.currentUserProfile = null; // 真實身分的 Firestore Profile
+        
+        // 從 localStorage 恢復真實身分
+        const savedRealProfile = localStorage.getItem('realProfile');
+        this.currentUserProfile = savedRealProfile ? JSON.parse(savedRealProfile) : null;
         
         // 從 localStorage 恢復模擬身分
         const savedImpersonation = localStorage.getItem('impersonatedProfile');
@@ -55,7 +58,21 @@ class AuthService {
      * 設定真實使用者的 Profile
      */
     setProfile(profile) {
-        this.currentUserProfile = profile;
+        // 如果傳入的是 null (登出)，清除所有狀態
+        if (!profile) {
+            this.currentUserProfile = null;
+            this.impersonatedProfile = null;
+            localStorage.removeItem('impersonatedProfile');
+            localStorage.removeItem('realProfile');
+            return;
+        }
+
+        // 如果目前沒有真實 Profile，或者傳入的是系統管理員，則更新真實 Profile
+        // 這是為了確保在重新整理頁面後，我們仍知道誰是「真實的」管理員
+        if (!this.currentUserProfile || profile.role === 'system_admin') {
+            this.currentUserProfile = profile;
+            localStorage.setItem('realProfile', JSON.stringify(profile));
+        }
     }
 
     /**

@@ -12,11 +12,15 @@ export class UserDashboard {
     }
 
     async render() {
-        return DashboardTemplate.renderUser(this.user.unitId, this.isImpersonating, this.isImpersonating);
+        // 只要真實身分是系統管理員，就顯示模擬控制台
+        const realProfile = authService.currentUserProfile;
+        const showConsole = (realProfile?.role === 'system_admin' || this.isImpersonating);
+        return DashboardTemplate.renderUser(this.user.unitId, this.isImpersonating, showConsole);
     }
 
     async afterRender() {
-        if (this.isImpersonating) {
+        const realProfile = authService.currentUserProfile;
+        if (realProfile?.role === 'system_admin' || this.isImpersonating) {
             await SystemAdminDashboard.initImpersonationConsole(this);
         }
 
