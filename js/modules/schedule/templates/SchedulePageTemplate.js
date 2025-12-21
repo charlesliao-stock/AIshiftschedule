@@ -150,7 +150,9 @@ export const SchedulePageTemplate = {
             const staffAssignments = assignments[uid] || {};
             const staffErrors = staffReport[uid]?.errors || {};
             // 讀取該員工的預班願望 (Wishes)
-            const wishes = preSchedule?.submissions?.[uid]?.wishes || {};
+            const submission = preSchedule?.submissions?.[uid] || {};
+            const wishes = submission.wishes || {};
+            const prefs = submission.preferences || {}; // 取得偏好
             
             // 狀態標籤
             let statusBadges = '';
@@ -158,12 +160,23 @@ export const SchedulePageTemplate = {
             if (staff.constraints?.isPostpartum) statusBadges += '<span class="badge bg-warning text-dark ms-1 small">哺</span>';
             if (staff.constraints?.canBatch) statusBadges += '<span class="badge bg-info text-dark ms-1 small">包</span>';
             
-            // 預班備註
-            let wishNote = '';
-            if (preSchedule && preSchedule.submissions && preSchedule.submissions[uid]) {
-               if(preSchedule.submissions[uid].notes) {
-                   wishNote = `<div class="text-muted small text-truncate" style="max-width:120px;">📝 ${preSchedule.submissions[uid].notes}</div>`;
-               }
+            // 📝 備註欄內容 (整合 Note + Preferences)
+            let remarkHtml = '';
+
+            // 1. 顯示偏好 (Priority)
+            if (prefs.priority1 || prefs.priority2) {
+                const p1 = prefs.priority1 || '-';
+                const p2 = prefs.priority2 || '-';
+                remarkHtml += `<div class="text-primary fw-bold" style="font-size: 0.7rem; line-height:1.2;">
+                    <i class="fas fa-heart me-1"></i>${p1} > ${p2}
+                </div>`;
+            }
+
+            // 2. 顯示文字備註
+            if (submission.notes) {
+                remarkHtml += `<div class="text-muted text-truncate fst-italic mt-1" style="font-size: 0.7rem; max-width:110px;" title="${submission.notes}">
+                    📝 ${submission.notes}
+                </div>`;
             }
 
             const deleteBtn = isInteractive 
@@ -178,7 +191,9 @@ export const SchedulePageTemplate = {
                     </div>
                 </td>
                 <td class="sticky-col second-col bg-white small text-muted">${staff.rank || ''}</td>
-                <td class="sticky-col third-col bg-white">${wishNote}</td>`;
+                <td class="sticky-col third-col bg-white" style="padding: 2px 4px !important; text-align: left; vertical-align: middle;">
+                    ${remarkHtml}
+                </td>`;
 
             // (A) 上月資料 (唯讀)
             if (prevMonthInfo && prevMonthInfo.displayDays) {
