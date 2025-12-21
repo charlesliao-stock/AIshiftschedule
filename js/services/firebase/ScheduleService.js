@@ -92,6 +92,19 @@ export class ScheduleService {
         }
     }
 
+    /**
+     * ✅ 新增：儲存排班 (相容前端呼叫)
+     * 前端傳入的是整個 scheduleData 物件，這裡將其拆解並呼叫 updateAllAssignments
+     */
+    static async saveSchedule(unitId, year, month, scheduleData) {
+        // 從 scheduleData 取出 assignments 和 prevAssignments
+        const assignments = scheduleData.assignments || {};
+        const prevAssignments = scheduleData.prevAssignments || null;
+        
+        // 呼叫底層更新方法
+        return await this.updateAllAssignments(unitId, year, month, assignments, prevAssignments);
+    }
+
     static async updateShift(unitId, year, month, staffId, day, shiftCode) {
         try {
             const db = firebaseService.getDb();
