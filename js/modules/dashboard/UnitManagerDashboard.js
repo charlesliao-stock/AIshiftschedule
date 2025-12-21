@@ -3,18 +3,24 @@ import { userService } from "../../services/firebase/UserService.js";
 import { SwapService } from "../../services/firebase/SwapService.js";
 import { authService } from "../../services/firebase/AuthService.js"; 
 import { DashboardTemplate } from "./templates/DashboardTemplate.js"; 
+import { SystemAdminDashboard } from "./SystemAdminDashboard.js";
 
 export class UnitManagerDashboard {
     constructor(user) { 
         this.user = user; 
         this.isImpersonating = !!user.isImpersonating; 
+        this.staffCache = [];
     }
 
     async render() {
-        return DashboardTemplate.renderManager(this.isImpersonating);
+        return DashboardTemplate.renderManager(this.isImpersonating, this.isImpersonating);
     }
 
     async afterRender() {
+        if (this.isImpersonating) {
+            await SystemAdminDashboard.initImpersonationConsole(this);
+        }
+
         // 綁定退出按鈕
         const exitBtn = document.getElementById('btn-exit-impersonate');
         if(exitBtn) {
