@@ -5,7 +5,7 @@ const MAX_RUNTIME = 60000;
 export class AutoScheduler {
 
     static async run(currentSchedule, staffList, unitSettings, preScheduleData, strategyCode = 'A') {
-        console.log(`🚀 AI 排班啟動 (v4.3 效能優化版): 策略 ${strategyCode}`);
+        console.log(`🚀 AI 排班啟動 (v4.4 預班保護版): 策略 ${strategyCode}`);
         const startTime = Date.now();
 
         try {
@@ -21,7 +21,7 @@ export class AutoScheduler {
                     break;
                 }
 
-                // ✅ 關鍵修正：每處理一天，讓出執行緒 0 毫秒 (避免 UI 卡死)
+                // ✅ 關鍵修正：每處理一天，讓出執行緒 (避免 UI 卡死)
                 await new Promise(resolve => setTimeout(resolve, 0));
 
                 // 1. 基礎排班
@@ -64,6 +64,9 @@ export class AutoScheduler {
 
         for (const staff of sortedStaff) {
             const uid = staff.uid;
+            
+            // 🔒 預班保護：若已在 prepareContext 中填入預班，且該日已鎖定，則跳過
+            // 因為 prepareContext 已經將預班填入 assignments，這裡跳過等於保留原值
             if (this.isLocked(context, uid, day)) continue;
 
             // 連六檢查
@@ -113,7 +116,7 @@ export class AutoScheduler {
     }
 
     // =========================================================================
-    // 🧠 Cycle 2: 智慧填補缺口 (Smart Fill) - v4.3 優化版
+    // 🧠 Cycle 2: 智慧填補缺口 (Smart Fill)
     // =========================================================================
     static async cycle2_SmartFill(context, day) {
         const { staffList, staffReq } = context;
@@ -127,7 +130,6 @@ export class AutoScheduler {
         const maxIterations = staffList.length + 10; 
         
         for (let iter = 0; iter < maxIterations; iter++) {
-            // ✅ 優化：每執行 5 次運算，暫停一下讓路給瀏覽器
             if (iter % 5 === 0) {
                 await new Promise(r => setTimeout(r, 0));
             }
@@ -139,6 +141,8 @@ export class AutoScheduler {
             if (gaps.length === 0) break;
 
             const candidates = [];
+            
+            // 🔒 篩選掉被預班鎖定的人 (isLocked)
             const offStaff = staffList.filter(s => 
                 !this.isLocked(context, s.uid, day) && 
                 context.assignments[s.uid][day] === 'OFF'
@@ -219,7 +223,6 @@ export class AutoScheduler {
                 }
             }
 
-            // 決策
             if (candidates.length === 0) {
                 const panicMove = this.getConsecutivePanicMove(context, day, gaps, surpluses);
                 if (panicMove) {
@@ -246,7 +249,6 @@ export class AutoScheduler {
         }
     }
 
-    // 輔助：當正常招數都無效時，找連上3天的人 (Panic Mode)
     static getConsecutivePanicMove(context, day, gaps, surpluses) {
         if (surpluses.length === 0) return null;
         const { staffList } = context;
@@ -302,19 +304,31 @@ export class AutoScheduler {
     }
 
     // =========================================================================
-    // 🛠️ 輔助函式
+    // 🛠️ 輔助函式 (修正：prepareContext 預填 PreSchedule)
     // =========================================================================
     static prepareContext(schedule, staffList, unitSettings, preSchedule, prevMonthData = {}) {
         const assignments = {};
         const stats = {};
         const preferences = {};
 
+        // 1. 初始化每個員工的資料結構
         staffList.forEach(staff => {
             const uid = staff.uid;
             assignments[uid] = {};
 
             let preOffCount = 0;
             const staffWishes = preSchedule?.submissions?.[uid]?.wishes || {};
+            
+            // ✅ 關鍵修正：將預班內容(Wishes)直接填入 assignments
+            Object.keys(staffWishes).forEach(day => {
+                const w = staffWishes[day];
+                if (w) {
+                    // 將 M_OFF 轉為 OFF，其餘照填 (D, E, N)
+                    assignments[uid][day] = (w === 'M_OFF' ? 'OFF' : w);
+                }
+            });
+
+            // 計算預班中的 OFF 數量 (用於統計)
             Object.values(staffWishes).forEach(w => {
                 if (w === 'OFF' || w === 'M_OFF') preOffCount++;
             });
@@ -323,14 +337,14 @@ export class AutoScheduler {
                 D: 0, E: 0, N: 0,
                 OFF: 0,
                 preOffCount: preOffCount,
-                totalOff: preOffCount, 
+                totalOff: 0 // 初始化為 0，稍後由 recalculateStaffStats 修正
             };
 
             const sub = preSchedule?.submissions?.[uid];
             preferences[uid] = sub?.preferences || {};
         });
 
-        return {
+        const context = {
             year: schedule.year,
             month: schedule.month,
             daysInMonth: new Date(schedule.year, schedule.month, 0).getDate(),
@@ -345,6 +359,14 @@ export class AutoScheduler {
             logs: [],
             prevMonthData: prevMonthData
         };
+
+        // ✅ 2. 根據剛剛填入的預班，初始化統計數據
+        // 這樣 AI 在第一天開始排班前，就已經知道每個人目前的連續工作天數、已排班數
+        staffList.forEach(staff => {
+            this.recalculateStaffStats(context, staff.uid);
+        });
+
+        return context;
     }
 
     static step1_Preparation(context) {}
@@ -371,6 +393,34 @@ export class AutoScheduler {
         if (shift === 'OFF') context.stats[uid].OFF++;
         
         context.stats[uid].totalOff = context.stats[uid].OFF + context.stats[uid].preOffCount;
+    }
+
+    // 重算統計資料 (用於初始化 Context 時)
+    static recalculateStaffStats(context, uid) {
+        const stats = context.stats[uid];
+        const assignments = context.assignments[uid];
+        const daysInMonth = context.daysInMonth;
+        
+        // 重置
+        stats.D = 0; stats.E = 0; stats.N = 0; stats.OFF = 0;
+        
+        for (let d = 1; d <= daysInMonth; d++) {
+            const s = assignments[d];
+            if (!s) continue;
+            
+            if (['D', 'E', 'N'].includes(s)) stats[s]++;
+            if (s === 'OFF') stats.OFF++;
+        }
+        // 更新 Total OFF
+        stats.totalOff = stats.OFF + stats.preOffCount; 
+        // 注意：這裡 preOffCount 可能會重複計算如果 assignments 已經包含了預班的 OFF
+        // 但因為我們在 assign 時只動 stats.OFF，所以這裡簡單相加即可。
+        // 若 assignments 已經包含預班 OFF，則 stats.OFF 已經計數了。
+        // 為避免雙重計算，若 assignments[d] 來自預班，則它貢獻給 stats.OFF。
+        // 所以 totalOff 應該直接等於 stats.OFF (如果所有預班都進了 assignments)
+        // 為了保險起見，我們統一邏輯：
+        // Total OFF = 目前排班表上的 OFF 數量 (包含預班的 OFF)
+        stats.totalOff = stats.OFF; 
     }
 
     static getCurrentCounts(context, day) {
@@ -474,6 +524,7 @@ export class AutoScheduler {
     }
 
     static isLocked(context, uid, day) {
+        // ✅ 確保只要有預班 (Wishes)，不管是 OFF 還是班別，都視為鎖定
         return !!context.wishes[uid]?.wishes?.[day];
     }
 
