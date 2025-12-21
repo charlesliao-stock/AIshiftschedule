@@ -1,11 +1,19 @@
 export const DashboardTemplate = {
     // 1. 系統管理員視圖 (含身分切換控制台)
-    renderAdmin() {
+    renderAdmin(isImpersonating) {
+        const exitBtn = isImpersonating ? `
+            <button id="btn-exit-impersonate" class="btn btn-danger btn-sm shadow ms-3 animate__animated animate__pulse animate__infinite">
+                <i class="fas fa-sign-out-alt me-1"></i> 退出模擬
+            </button>` : '';
+
         return `
             <div class="dashboard-content container-fluid p-0">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2 class="h3 text-gray-800"><i class="fas fa-tachometer-alt text-primary me-2"></i>系統概覽</h2>
-                    <span class="badge bg-danger fs-6">系統管理員模式</span>
+                    <div class="d-flex align-items-center">
+                        <h2 class="h3 text-gray-800 mb-0"><i class="fas fa-tachometer-alt text-primary me-2"></i>系統概覽</h2>
+                        <span class="badge bg-danger fs-6 ms-2">系統管理員模式</span>
+                        ${exitBtn}
+                    </div>
                 </div>
 
                 <div class="card shadow mb-4 border-left-danger">

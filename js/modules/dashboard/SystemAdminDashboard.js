@@ -10,12 +10,19 @@ export class SystemAdminDashboard {
     }
 
     render() {
-        return DashboardTemplate.renderAdmin();
+        const isImpersonating = !!authService.getProfile()?.isImpersonating;
+        return DashboardTemplate.renderAdmin(isImpersonating);
     }
 
     async afterRender() {
         this.loadStats();
         this.initImpersonationConsole();
+        
+        // 綁定退出按鈕
+        const exitBtn = document.getElementById('btn-exit-impersonate');
+        if(exitBtn) {
+            exitBtn.addEventListener('click', () => authService.stopImpersonation());
+        }
     }
 
     async loadStats() {

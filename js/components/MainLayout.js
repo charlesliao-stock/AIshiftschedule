@@ -4,12 +4,15 @@ import { MainLayoutTemplate } from "./templates/MainLayoutTemplate.js"; // 引�
 
 export class MainLayout {
     constructor(user) {
-        this.user = authService.getProfile() || user || { name: '載入中...', role: 'guest' };
-        if (this.user.role === 'system_admin' && !this.user.originalRole) {
-            this.user.originalRole = 'system_admin';
-            authService.setProfile(this.user);
-        }
-        this.realRole = this.user.originalRole || this.user.role; 
+        // 優先取得當前 Profile (可能包含模擬身分)
+        const profile = authService.getProfile();
+        this.user = profile || user || { name: '載入中...', role: 'guest' };
+        
+        // 取得真實身分 (從 authService.currentUserProfile)
+        const realProfile = authService.currentUserProfile;
+        this.realRole = realProfile?.role || this.user.originalRole || this.user.role;
+        
+        // 當前顯示的角色
         this.currentRole = this.user.role;
         this.autoHideTimer = null;
     }
@@ -19,6 +22,7 @@ export class MainLayout {
         const menuHtml = MainLayoutTemplate.renderMenuHtml(menus);
         const displayRoleName = this.getRoleName(this.realRole);
         
+        // 只有真實身分為系統管理員時才顯示切換器
         const showSwitcher = (this.realRole === 'system_admin');
         const roleSwitcherHtml = showSwitcher ? MainLayoutTemplate.renderRoleSwitcher(this.currentRole) : '';
 
@@ -118,10 +122,26 @@ export class MainLayout {
         const roleSwitcher = document.getElementById('role-switcher');
         if (roleSwitcher) {
             roleSwitcher.addEventListener('change', (e) => {
-                this.user.role = e.target.value;
-                authService.setProfile(this.user);
-                router.currentLayout = null; 
-                router.handleRoute();
+                const targetRole = e.target.value;
+                
+                // 如果是切換回系統管理員，且目前正在模擬，則停止模擬
+                if (targetRole === 'system_admin' && this.user.isImpersonating) {
+                    authService.stopImpersonation();
+                    return;
+                }
+
+                // 否則只是單純切換視角 (不改變模擬的人員，只改變角色權限)
+                // 注意：這裡的邏輯是為了相容原本的 role-switcher
+                this.user.role = targetRole;
+                if (this.user.isImpersonating) {
+                    // 如果正在模擬，更新模擬的 Profile 並存入 localStorage
+                    authService.impersonate(this.user);
+                } else {
+                    // 如果不是模擬，更新真實 Profile
+                    authService.setProfile(this.user);
+                    router.currentLayout = null; 
+                    router.handleRoute();
+                }
             });
         }
 

@@ -5,7 +5,10 @@ class AuthService {
     constructor() { 
         this.currentUser = null;        // Firebase Auth User
         this.currentUserProfile = null; // 真實身分的 Firestore Profile
-        this.impersonatedProfile = null; // 模擬的身分 Profile
+        
+        // 從 localStorage 恢復模擬身分
+        const savedImpersonation = localStorage.getItem('impersonatedProfile');
+        this.impersonatedProfile = savedImpersonation ? JSON.parse(savedImpersonation) : null;
     }
 
     async login(email, password) {
@@ -26,6 +29,7 @@ class AuthService {
             this.currentUser = null;
             this.currentUserProfile = null;
             this.impersonatedProfile = null; // 清除模擬狀態
+            localStorage.removeItem('impersonatedProfile');
             return true;
         } catch (error) {
             console.error("登出失敗:", error);
@@ -75,6 +79,7 @@ class AuthService {
      */
     impersonate(targetProfile) {
         this.impersonatedProfile = targetProfile;
+        localStorage.setItem('impersonatedProfile', JSON.stringify(targetProfile));
         // 強制重新整理頁面以套用新身分
         window.location.reload();
     }
@@ -84,6 +89,7 @@ class AuthService {
      */
     stopImpersonation() {
         this.impersonatedProfile = null;
+        localStorage.removeItem('impersonatedProfile');
         window.location.reload();
     }
 

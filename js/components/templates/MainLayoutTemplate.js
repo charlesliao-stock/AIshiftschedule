@@ -40,15 +40,16 @@ export const MainLayoutTemplate = {
     },
 
     renderRoleSwitcher(currentRole) {
+        const isImpersonating = !!localStorage.getItem('impersonatedProfile');
         return `
-            <div class="me-3 d-flex align-items-center bg-white rounded px-2 border shadow-sm" style="height: 32px;">
-                <i class="fas fa-random text-primary me-2" title="視角切換"></i>
+            <div class="me-3 d-flex align-items-center bg-white rounded px-2 border shadow-sm" style="height: 32px; ${isImpersonating ? 'border-color: #dc3545 !important;' : ''}">
+                <i class="fas fa-random ${isImpersonating ? 'text-danger' : 'text-primary'} me-2" title="視角切換"></i>
                 <select id="role-switcher" class="form-select form-select-sm border-0 bg-transparent p-0 shadow-none fw-bold" style="width: auto; cursor: pointer;">
-                    <option value="system_admin" ${currentRole === 'system_admin' ? 'selected' : ''}>👁️ 系統管理員</option>
+                    <option value="system_admin" ${currentRole === 'system_admin' ? 'selected' : ''}>${isImpersonating ? '🔙 結束模擬' : '👁️ 系統管理員'}</option>
                     <option disabled>────────</option>
-                    <option value="unit_manager" ${currentRole === 'unit_manager' ? 'selected' : ''}>👁️ 模擬: 單位主管</option>
-                    <option value="unit_scheduler" ${currentRole === 'unit_scheduler' ? 'selected' : ''}>👁️ 模擬: 排班者</option>
-                    <option value="user" ${currentRole === 'user' ? 'selected' : ''}>👁️ 模擬: 一般人員</option>
+                    <option value="unit_manager" ${currentRole === 'unit_manager' ? 'selected' : ''}>👁️ 視角: 單位主管</option>
+                    <option value="unit_scheduler" ${currentRole === 'unit_scheduler' ? 'selected' : ''}>👁️ 視角: 排班者</option>
+                    <option value="user" ${currentRole === 'user' ? 'selected' : ''}>👁️ 視角: 一般人員</option>
                 </select>
                 <i class="fas fa-caret-down text-muted ms-2" style="font-size: 0.8rem;"></i>
             </div>`;
