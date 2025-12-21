@@ -9,8 +9,9 @@ export class MainLayout {
         this.user = profile || user || { name: '載入中...', role: 'guest' };
         
         // 取得真實身分 (從 authService.currentUserProfile)
+        // 注意：如果正在模擬，authService.currentUserProfile 應該保留原始管理員資料
         const realProfile = authService.currentUserProfile;
-        this.realRole = realProfile?.role || this.user.originalRole || this.user.role;
+        this.realRole = realProfile?.role || this.user.originalRole || (this.user.isImpersonating ? 'system_admin' : this.user.role);
         
         // 當前顯示的角色
         this.currentRole = this.user.role;
@@ -22,8 +23,9 @@ export class MainLayout {
         const menuHtml = MainLayoutTemplate.renderMenuHtml(menus);
         const displayRoleName = this.getRoleName(this.realRole);
         
-        // 只有真實身分為系統管理員時才顯示切換器
-        const showSwitcher = (this.realRole === 'system_admin');
+        // 只要真實身分是系統管理員，或者正在模擬中，就顯示切換器
+        const isImpersonating = !!this.user.isImpersonating;
+        const showSwitcher = (this.realRole === 'system_admin' || isImpersonating);
         const roleSwitcherHtml = showSwitcher ? MainLayoutTemplate.renderRoleSwitcher(this.currentRole) : '';
 
         return MainLayoutTemplate.render(this.user, roleSwitcherHtml, menuHtml, displayRoleName);

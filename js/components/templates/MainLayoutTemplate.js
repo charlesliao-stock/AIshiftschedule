@@ -41,6 +41,7 @@ export const MainLayoutTemplate = {
 
     renderRoleSwitcher(currentRole) {
         const isImpersonating = !!localStorage.getItem('impersonatedProfile');
+        // 修正：如果正在模擬，且當前角色不是管理員，則下拉選單應顯示當前模擬的角色
         return `
             <div class="me-3 d-flex align-items-center bg-white rounded px-2 border shadow-sm" style="height: 32px; ${isImpersonating ? 'border-color: #dc3545 !important;' : ''}">
                 <i class="fas fa-random ${isImpersonating ? 'text-danger' : 'text-primary'} me-2" title="視角切換"></i>
