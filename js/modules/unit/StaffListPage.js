@@ -15,6 +15,7 @@ export class StaffListPage {
 
     async render() {
         let retries = 0;
+        // 等待 Auth 初始化
         while (!authService.getProfile() && retries < 10) { await new Promise(r => setTimeout(r, 200)); retries++; }
         this.currentUser = authService.getProfile();
         
@@ -24,7 +25,7 @@ export class StaffListPage {
         try {
             let units = [];
             
-            // --- 關鍵修改：權限邏輯 ---
+            // 權限邏輯
             if (this.currentUser.isImpersonating) {
                 if (this.currentUser.unitId) {
                     const u = await UnitService.getUnitById(this.currentUser.unitId);
@@ -58,32 +59,41 @@ export class StaffListPage {
 
         } catch (e) {
             console.error(e);
+            // 發生錯誤時，回傳錯誤 UI，此時頁面上不會有 Modal 元素
             return `<div class="alert alert-danger m-3">載入失敗: ${e.message}</div>`;
         }
     }
 
     async afterRender() {
-        this.editModal = new bootstrap.Modal(document.getElementById('edit-staff-modal'));
+        // 🔴【關鍵修正】安全檢查
+        const modalElement = document.getElementById('edit-staff-modal');
+        if (!modalElement) {
+            console.warn("⚠️ 找不到 Modal 元素，可能是 render() 發生錯誤顯示了錯誤訊息。");
+            return; // 直接中止，避免 Bootstrap 報錯
+        }
+
+        this.editModal = new bootstrap.Modal(modalElement);
         window.routerPage = this;
 
         const unitSelect = document.getElementById('unit-filter');
         
-        if (unitSelect.options.length > 0) {
+        if (unitSelect && unitSelect.options.length > 0) {
             unitSelect.selectedIndex = 0;
             this.loadData();
         }
 
-        unitSelect.addEventListener('change', () => this.loadData());
+        // 綁定事件 (加入 ? 檢查以免元素不存在時報錯)
+        unitSelect?.addEventListener('change', () => this.loadData());
         
-        document.getElementById('btn-add-staff').addEventListener('click', () => {
+        document.getElementById('btn-add-staff')?.addEventListener('click', () => {
             window.location.hash = '/unit/staff/create';
         });
 
-        document.getElementById('keyword-search').addEventListener('input', (e) => {
+        document.getElementById('keyword-search')?.addEventListener('input', (e) => {
             this.filterData(e.target.value);
         });
 
-        document.getElementById('btn-save').addEventListener('click', () => this.saveEdit());
+        document.getElementById('btn-save')?.addEventListener('click', () => this.saveEdit());
 
         document.querySelectorAll('th[data-sort]').forEach(th => {
             th.addEventListener('click', () => this.handleSort(th.dataset.sort));
@@ -91,18 +101,19 @@ export class StaffListPage {
     }
 
     async loadData() {
-        const unitId = document.getElementById('unit-filter').value;
+        const unitSelect = document.getElementById('unit-filter');
+        const unitId = unitSelect ? unitSelect.value : null;
         if(!unitId) return;
 
         const tbody = document.getElementById('staff-tbody');
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+        if(tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
         try {
             this.staffList = await userService.getUsersByUnit(unitId);
             this.applySort();
         } catch (e) {
             console.error(e);
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">載入失敗: ${e.message}</td></tr>`;
+            if(tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">載入失敗: ${e.message}</td></tr>`;
         }
     }
 
@@ -143,6 +154,7 @@ export class StaffListPage {
 
     renderTable() {
         const tbody = document.getElementById('staff-tbody');
+        if(!tbody) return;
         const isRealAdmin = (this.currentUser.role === 'system_admin' && !this.currentUser.isImpersonating);
         tbody.innerHTML = StaffListTemplate.renderRows(this.displayList, isRealAdmin);
     }
