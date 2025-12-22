@@ -24,15 +24,15 @@ export class GroupSettingsPage {
         
         let units = [];
         
-        // 🔴 新增：模擬狀態判斷與鎖定
+        // 🔴 加入鎖定邏輯
         if (user.isImpersonating) {
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
                 if(u) units = [u];
             }
-            unitSelect.disabled = true; // 鎖定
+            unitSelect.disabled = true; // 鎖定!
         }
-        else if (user.role === 'system_admin') {
+        else if (user.role === 'system_admin' || user.originalRole === 'system_admin') {
             units = await UnitService.getAllUnits();
             unitSelect.disabled = false;
         } else {
@@ -49,8 +49,13 @@ export class GroupSettingsPage {
         } else {
             unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
             
-            // 預設選取並載入
-            this.targetUnitId = units[0].unitId;
+            // 預設選取
+            if(user.isImpersonating) {
+                this.targetUnitId = user.unitId;
+            } else {
+                this.targetUnitId = units[0].unitId;
+            }
+
             unitSelect.value = this.targetUnitId;
             this.loadData(this.targetUnitId);
         }
@@ -60,7 +65,6 @@ export class GroupSettingsPage {
             this.loadData(this.targetUnitId);
         });
 
-        // 綁定其他按鈕 (維持原樣)
         document.getElementById('btn-add').addEventListener('click', () => {
             document.getElementById('new-group-name').value = '';
             this.modal.show();
@@ -68,8 +72,8 @@ export class GroupSettingsPage {
         document.getElementById('btn-save-group').addEventListener('click', () => this.addGroup());
     }
 
-    // loadData, addGroup, deleteGroup, saveAssignments 維持原樣...
     async loadData(unitId) {
+        if(!unitId) return;
         try {
             const unit = await UnitService.getUnitById(unitId);
             this.groups = unit?.groups || [];
@@ -79,13 +83,13 @@ export class GroupSettingsPage {
             document.getElementById('group-list').innerHTML = GroupSettingsTemplate.renderGroupList(this.groups);
             document.getElementById('staff-tbody').innerHTML = GroupSettingsTemplate.renderStaffRows(this.staffList, this.groups);
             
-            // 綁定下拉選單變更
             document.querySelectorAll('.group-select').forEach(sel => {
                 sel.addEventListener('change', () => this.saveAssignments());
             });
         } catch (e) { console.error(e); }
     }
     
+    // ... 其餘方法保持不變 ...
     async addGroup() { /* ... */ }
     async deleteGroup(idx) { /* ... */ }
     async saveAssignments() { /* ... */ }
