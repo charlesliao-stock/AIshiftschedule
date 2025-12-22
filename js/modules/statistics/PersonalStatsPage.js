@@ -1,7 +1,7 @@
 import { ScheduleService } from "../../services/firebase/ScheduleService.js";
 import { authService } from "../../services/firebase/AuthService.js";
-import { StatisticsService } from "../../services/StatisticsService.js"; // 修正引用
-import { PersonalStatsTemplate } from "./templates/PersonalStatsTemplate.js"; // 引入 Template
+import { StatisticsService } from "../../services/StatisticsService.js"; 
+import { PersonalStatsTemplate } from "./templates/PersonalStatsTemplate.js"; 
 
 export class PersonalStatsPage {
     constructor() {
@@ -12,7 +12,6 @@ export class PersonalStatsPage {
     }
 
     async render() {
-        // 直接渲染版面，移除管理員模擬區塊
         return PersonalStatsTemplate.renderLayout(this.year, this.month);
     }
 
@@ -23,7 +22,6 @@ export class PersonalStatsPage {
 
         if (!this.currentUser) return;
 
-        // 綁定查詢事件
         document.getElementById('btn-query').addEventListener('click', () => {
             const val = document.getElementById('stats-month').value;
             if(val) {
@@ -34,7 +32,6 @@ export class PersonalStatsPage {
             }
         });
 
-        // 初始載入
         this.loadStats();
     }
 
