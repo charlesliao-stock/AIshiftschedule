@@ -51,7 +51,6 @@ export class ScheduleListPage {
     async afterRender() {
         this.unitSelect = document.getElementById('schedule-unit-select');
         
-        // 1. 權限與單位處理
         let retries = 0;
         while (!authService.getProfile() && retries < 10) { await new Promise(r => setTimeout(r, 200)); retries++; }
         const user = authService.getProfile();
@@ -65,30 +64,25 @@ export class ScheduleListPage {
         
         // --- 關鍵修改：模擬狀態鎖定邏輯 ---
         if (user.isImpersonating) {
-            // 模擬模式：強制鎖定在當前單位
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
                 if (u) units = [u];
             }
-            this.unitSelect.disabled = true; // 鎖定下拉選單
+            this.unitSelect.disabled = true; // 鎖定
         } 
         else if (user.role === 'system_admin') {
-            // 真·管理員模式：載入所有單位
             units = await UnitService.getAllUnits();
             this.unitSelect.disabled = false;
         } 
         else {
-            // 一般主管模式：載入管轄單位
             units = await UnitService.getUnitsByManager(user.uid);
             if (units.length === 0 && user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
                 if(u) units.push(u);
             }
-            // 若只有一個單位，也鎖定以免誤操作
             this.unitSelect.disabled = units.length <= 1;
         }
 
-        // 渲染選單
         if (units.length === 0) {
             this.unitSelect.innerHTML = '<option value="">無權限或無單位</option>';
             return;
@@ -98,10 +92,8 @@ export class ScheduleListPage {
             `<option value="${u.unitId}">${u.unitName} (${u.unitCode})</option>`
         ).join('');
 
-        // 監聽切換
         this.unitSelect.addEventListener('change', () => this.loadSchedules(this.unitSelect.value));
 
-        // 自動觸發載入 (預設選第一個)
         if (units.length > 0) {
             this.unitSelect.value = units[0].unitId;
             this.loadSchedules(units[0].unitId);
@@ -114,12 +106,10 @@ export class ScheduleListPage {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4"><div class="spinner-border text-primary"></div></td></tr>';
 
         try {
-            // 抓取最近 3 個月的資料
             const today = new Date();
             const year = today.getFullYear();
             const month = today.getMonth() + 1;
             
-            // 產生月份列表 (本月, 下月, 下下月)
             const months = [];
             for(let i=0; i<3; i++) {
                 let y = year, m = month + i;
@@ -128,17 +118,15 @@ export class ScheduleListPage {
             }
 
             const rows = await Promise.all(months.map(async (pre) => {
-                // 平行載入 PreSchedule 與 Schedule
                 const [preData, schedule] = await Promise.all([
                     PreScheduleService.getPreSchedule(unitId, pre.year, pre.month),
                     ScheduleService.getSchedule(unitId, pre.year, pre.month)
                 ]);
 
-                // 狀態判斷
                 let preStatus = '<span class="badge bg-secondary">未開啟</span>';
                 if (preData) {
                     if (preData.status === 'open') preStatus = '<span class="badge bg-success">進行中</span>';
-                    else if (preData.status === 'closed') preStatus = '<span class=\"badge bg-dark\">已截止</span>';
+                    else if (preData.status === 'closed') preStatus = '<span class="badge bg-dark">已截止</span>';
                 }
 
                 let schStatus = '<span class="badge bg-secondary">未建立</span>';
