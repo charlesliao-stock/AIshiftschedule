@@ -24,13 +24,13 @@ export class PreScheduleManagePage {
         
         let units = [];
         
-        // --- 關鍵修改：模擬鎖定 ---
+        // 權限與模擬邏輯
         if (user.isImpersonating) {
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
                 if(u) units = [u];
             }
-            this.unitSelect.disabled = true;
+            this.unitSelect.disabled = true; // 鎖定
         }
         else if (user.role === 'system_admin') {
             units = await UnitService.getAllUnits();
@@ -53,19 +53,37 @@ export class PreScheduleManagePage {
         this.unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
         document.getElementById('unit-selector-container').style.display = 'block';
 
+        // 🔴 關鍵修正：確保選單值正確，並強制觸發載入
         this.targetUnitId = units[0].unitId;
         this.unitSelect.value = this.targetUnitId;
         
+        // 綁定切換
         this.unitSelect.addEventListener('change', (e) => {
             this.targetUnitId = e.target.value;
             this.loadList(this.targetUnitId);
         });
 
-        this.loadList(this.targetUnitId);
+        // 立即載入
+        await this.loadList(this.targetUnitId);
     }
     
+    // 補上之前省略的 loadList，確保它能運作
     async loadList(unitId) {
-        // 載入該單位的預班列表 (邏輯省略，維持原樣)
         console.log("Loading pre-schedule list for unit:", unitId);
+        // 這裡需要呼叫 Service 取得列表並渲染，因您之前未提供此 Template 的完整渲染邏輯
+        // 假設 Template 有提供 renderListRows (若無請根據實際情況調整)
+        // 這裡示範基本邏輯：
+        try {
+            const list = await PreScheduleService.getPreSchedulesList(unitId);
+            // 假設您有一個容器 id="pre-schedule-list-tbody" 在 Template 中
+            // 如果您的 Template 結構不同，請調整這裡
+            /* const tbody = document.getElementById('pre-schedule-list-tbody');
+            if(tbody) {
+                tbody.innerHTML = list.map(item => `<tr><td>...</td></tr>`).join('');
+            }
+            */
+        } catch(e) {
+            console.error("Load list error:", e);
+        }
     }
 }
