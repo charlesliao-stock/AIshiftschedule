@@ -16,6 +16,7 @@ export class PreScheduleManagePage {
 
     async afterRender() {
         this.unitSelect = document.getElementById('unit-selector');
+        // 若 Template 中 ID 不同，請自行調整 (這裡假設是 unit-selector)
         if(!this.unitSelect) return; 
 
         let retries = 0;
@@ -24,13 +25,13 @@ export class PreScheduleManagePage {
         
         let units = [];
         
-        // 權限與模擬邏輯
+        // 權限與鎖定邏輯
         if (user.isImpersonating) {
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
                 if(u) units = [u];
             }
-            this.unitSelect.disabled = true; // 鎖定
+            this.unitSelect.disabled = true;
         }
         else if (user.role === 'system_admin') {
             units = await UnitService.getAllUnits();
@@ -51,37 +52,56 @@ export class PreScheduleManagePage {
         }
 
         this.unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
-        document.getElementById('unit-selector-container').style.display = 'block';
+        
+        // 顯示選單容器 (依您的 Template ID 調整)
+        const container = document.getElementById('unit-selector-container');
+        if(container) container.style.display = 'block';
 
-        // 🔴 關鍵修正：確保選單值正確，並強制觸發載入
-        this.targetUnitId = units[0].unitId;
+        // 🔴【關鍵修正】明確設定目標 ID
+        // 如果正在模擬，直接取 user.unitId，否則取選單第一個
+        if (user.isImpersonating) {
+            this.targetUnitId = user.unitId;
+        } else {
+            this.targetUnitId = units[0].unitId;
+        }
+
+        // 同步 UI
         this.unitSelect.value = this.targetUnitId;
         
-        // 綁定切換
+        // 綁定事件
         this.unitSelect.addEventListener('change', (e) => {
             this.targetUnitId = e.target.value;
             this.loadList(this.targetUnitId);
         });
 
         // 立即載入
+        console.log("🚀 載入預班列表, UnitID:", this.targetUnitId);
         await this.loadList(this.targetUnitId);
     }
     
-    // 補上之前省略的 loadList，確保它能運作
     async loadList(unitId) {
-        console.log("Loading pre-schedule list for unit:", unitId);
-        // 這裡需要呼叫 Service 取得列表並渲染，因您之前未提供此 Template 的完整渲染邏輯
-        // 假設 Template 有提供 renderListRows (若無請根據實際情況調整)
-        // 這裡示範基本邏輯：
+        if(!unitId) return;
+        
+        // 假設 Template 裡有列表容器
+        // 因不確定您的 Template 結構，這裡做一個通用處理
+        // 您可能需要根據 PreScheduleManageTemplate.js 來調整 renderList 的位置
         try {
+            // 這裡呼叫 Service 取得資料
             const list = await PreScheduleService.getPreSchedulesList(unitId);
-            // 假設您有一個容器 id="pre-schedule-list-tbody" 在 Template 中
-            // 如果您的 Template 結構不同，請調整這裡
-            /* const tbody = document.getElementById('pre-schedule-list-tbody');
-            if(tbody) {
-                tbody.innerHTML = list.map(item => `<tr><td>...</td></tr>`).join('');
-            }
+            
+            // 呼叫 Template 的渲染方法 (如果有的話)
+            // document.getElementById('schedule-list-container').innerHTML = PreScheduleManageTemplate.renderList(list);
+            
+            // 或是暫時用 console 確認資料已抓到
+            console.log("✅ 預班資料讀取成功:", list);
+            
+            // 如果介面沒出來，請確認 Template 是否有 renderList 方法，或是手動渲染 DOM
+            // 範例手動渲染：
+            /*
+            const tbody = document.querySelector('tbody'); 
+            if(tbody) tbody.innerHTML = list.map(item => `<tr><td>${item.year}-${item.month}</td><td>${item.status}</td></tr>`).join('');
             */
+
         } catch(e) {
             console.error("Load list error:", e);
         }
