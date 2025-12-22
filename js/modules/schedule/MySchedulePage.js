@@ -1,7 +1,5 @@
 import { ScheduleService } from "../../services/firebase/ScheduleService.js";
-import { UnitService } from "../../services/firebase/UnitService.js";
 import { authService } from "../../services/firebase/AuthService.js";
-import { userService } from "../../services/firebase/UserService.js";
 import { MyScheduleTemplate } from "./templates/MyScheduleTemplate.js"; 
 
 export class MySchedulePage {
@@ -17,11 +15,8 @@ export class MySchedulePage {
     }
 
     async afterRender() {
-        // 1. 身分驗證 (等待 Auth 初始化)
         let retries = 0;
         while (!authService.getProfile() && retries < 10) { await new Promise(r => setTimeout(r, 200)); retries++; }
-        
-        // 取得當前使用者 (若是模擬中，這裡已經是替身了)
         this.currentUser = authService.getProfile();
         
         if (!this.currentUser) {
@@ -29,18 +24,14 @@ export class MySchedulePage {
             return;
         }
 
-        // 2. 綁定一般查詢事件
         document.getElementById('btn-query').addEventListener('click', () => this.loadSchedule());
-
-        // 3. 初始載入
         await this.loadSchedule();
     }
 
     async loadSchedule() {
         let val = document.getElementById('my-month')?.value;
-        if(!val) {
-            val = `${this.year}-${String(this.month).padStart(2,'0')}`;
-        } else {
+        if(!val) val = `${this.year}-${String(this.month).padStart(2,'0')}`;
+        else {
             const [y, m] = val.split('-');
             this.year = parseInt(y);
             this.month = parseInt(m);
@@ -48,11 +39,9 @@ export class MySchedulePage {
 
         const daysInMonth = new Date(this.year, this.month, 0).getDate();
         
-        // 渲染表頭
         document.getElementById('table-head-date').innerHTML = MyScheduleTemplate.renderHeadDate(this.year, this.month, daysInMonth);
         document.getElementById('table-head-week').innerHTML = MyScheduleTemplate.renderHeadWeek(this.year, this.month, daysInMonth);
 
-        // 查詢資料
         const unitId = this.currentUser?.unitId;
         if(!unitId) {
             document.getElementById('table-body-shift').innerHTML = `<td colspan="${daysInMonth}" class="p-5 text-center text-muted">此帳號未綁定單位</td>`;
@@ -60,8 +49,6 @@ export class MySchedulePage {
         }
 
         const schedule = await ScheduleService.getSchedule(unitId, this.year, this.month);
-        
-        // 渲染內容
         const rowHtml = MyScheduleTemplate.renderBodyRow(schedule, this.currentUser.uid, daysInMonth);
         document.getElementById('table-body-shift').innerHTML = rowHtml;
     }
