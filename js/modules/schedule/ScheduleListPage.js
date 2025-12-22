@@ -4,7 +4,10 @@ import { PreScheduleService } from "../../services/firebase/PreScheduleService.j
 import { authService } from "../../services/firebase/AuthService.js";
 
 export class ScheduleListPage {
-    constructor() { this.targetUnitId = null; }
+    constructor() { 
+        this.targetUnitId = null; 
+        this.unitSelect = null;
+    }
 
     async render() {
         return `
@@ -29,13 +32,13 @@ export class ScheduleListPage {
                                     <tr>
                                         <th>月份</th>
                                         <th>預班狀態</th>
-                                        <th>排班狀態</th> 
-                                        <th>審核狀態</th> 
+                                        <th>正式班表</th>
+                                        <th>審核</th>
                                         <th>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="schedule-list-tbody">
-                                    <tr><td colspan="5" class="p-4 text-center text-muted">請先選擇單位</td></tr>
+                                    <tr><td colspan="5" class="text-center p-4">請選擇單位以載入資料</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -46,76 +49,102 @@ export class ScheduleListPage {
     }
 
     async afterRender() {
+        this.unitSelect = document.getElementById('schedule-unit-select');
+        
+        // 1. 權限與單位處理
+        let retries = 0;
+        while (!authService.getProfile() && retries < 10) { await new Promise(r => setTimeout(r, 200)); retries++; }
         const user = authService.getProfile();
-        const unitSelect = document.getElementById('schedule-unit-select');
-        const isAdmin = user.role === 'system_admin' || user.originalRole === 'system_admin';
-
-        let units = [];
-        if (isAdmin) {
-            units = await UnitService.getAllUnits();
-        } else {
-            units = await UnitService.getUnitsByManager(user.uid);
-            if (units.length === 0 && user.unitId) {
-                const u = await UnitService.getUnitById(user.unitId);
-                if (u) units.push(u);
-            }
-        }
-
-        if (units.length === 0) {
-            unitSelect.innerHTML = '<option value="">無權限</option>';
-            unitSelect.disabled = true;
+        
+        if (!user) {
+            this.unitSelect.innerHTML = '<option>未登入</option>';
             return;
         }
 
-        // ✅ 權限邏輯：系統管理員需手動選擇，避免預載
-        if (isAdmin) {
-            unitSelect.innerHTML = '<option value="" disabled selected>請選擇單位...</option>' + 
-                                   units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
-            unitSelect.disabled = false;
-        } else {
-            // 一般管理者
-            unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
-            
-            // 只有一個單位時，自動選取並載入
-            if (units.length > 0) {
-                this.loadSchedules(units[0].unitId);
+        let units = [];
+        
+        // --- 關鍵修改：模擬狀態鎖定邏輯 ---
+        if (user.isImpersonating) {
+            // 模擬模式：強制鎖定在當前單位
+            if (user.unitId) {
+                const u = await UnitService.getUnitById(user.unitId);
+                if (u) units = [u];
             }
+            this.unitSelect.disabled = true; // 鎖定下拉選單
+        } 
+        else if (user.role === 'system_admin') {
+            // 真·管理員模式：載入所有單位
+            units = await UnitService.getAllUnits();
+            this.unitSelect.disabled = false;
+        } 
+        else {
+            // 一般主管模式：載入管轄單位
+            units = await UnitService.getUnitsByManager(user.uid);
+            if (units.length === 0 && user.unitId) {
+                const u = await UnitService.getUnitById(user.unitId);
+                if(u) units.push(u);
+            }
+            // 若只有一個單位，也鎖定以免誤操作
+            this.unitSelect.disabled = units.length <= 1;
         }
 
-        unitSelect.addEventListener('change', (e) => {
-            if (e.target.value) this.loadSchedules(e.target.value);
-        });
+        // 渲染選單
+        if (units.length === 0) {
+            this.unitSelect.innerHTML = '<option value="">無權限或無單位</option>';
+            return;
+        }
+
+        this.unitSelect.innerHTML = units.map(u => 
+            `<option value="${u.unitId}">${u.unitName} (${u.unitCode})</option>`
+        ).join('');
+
+        // 監聽切換
+        this.unitSelect.addEventListener('change', () => this.loadSchedules(this.unitSelect.value));
+
+        // 自動觸發載入 (預設選第一個)
+        if (units.length > 0) {
+            this.unitSelect.value = units[0].unitId;
+            this.loadSchedules(units[0].unitId);
+        }
     }
 
     async loadSchedules(unitId) {
         this.targetUnitId = unitId;
         const tbody = document.getElementById('schedule-list-tbody');
-        tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center"><span class="spinner-border spinner-border-sm"></span> 載入中...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4"><div class="spinner-border text-primary"></div></td></tr>';
 
         try {
-            const preSchedules = await PreScheduleService.getPreSchedulesList(unitId);
-
-            if (preSchedules.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-muted">此單位尚無預班表紀錄</td></tr>';
-                return;
+            // 抓取最近 3 個月的資料
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth() + 1;
+            
+            // 產生月份列表 (本月, 下月, 下下月)
+            const months = [];
+            for(let i=0; i<3; i++) {
+                let y = year, m = month + i;
+                if(m > 12) { m -= 12; y++; }
+                months.push({ year: y, month: m });
             }
 
-            const now = new Date().toISOString().split('T')[0];
+            const rows = await Promise.all(months.map(async (pre) => {
+                // 平行載入 PreSchedule 與 Schedule
+                const [preData, schedule] = await Promise.all([
+                    PreScheduleService.getPreSchedule(unitId, pre.year, pre.month),
+                    ScheduleService.getSchedule(unitId, pre.year, pre.month)
+                ]);
 
-            const rows = await Promise.all(preSchedules.map(async (pre) => {
-                const schedule = await ScheduleService.getSchedule(unitId, pre.year, pre.month);
-                
-                let preStatus = '';
-                if (now >= pre.settings.openDate && now <= pre.settings.closeDate) preStatus = '<span class="badge bg-success">開放中</span>';
-                else if (now > pre.settings.closeDate) preStatus = '<span class="badge bg-secondary">已截止</span>';
-                else preStatus = '<span class="badge bg-warning text-dark">未開放</span>';
-
-                let approvedStatus = '<span class="text-muted">-</span>';
-                if (now > pre.settings.closeDate || pre.status === 'closed') {
-                    approvedStatus = '<span class="text-success fw-bold"><i class="fas fa-check-circle"></i> 審核通過</span>';
+                // 狀態判斷
+                let preStatus = '<span class="badge bg-secondary">未開啟</span>';
+                if (preData) {
+                    if (preData.status === 'open') preStatus = '<span class="badge bg-success">進行中</span>';
+                    else if (preData.status === 'closed') preStatus = '<span class=\"badge bg-dark\">已截止</span>';
                 }
 
-                let schStatus = '<span class="badge bg-light text-dark border">未開始</span>';
+                let schStatus = '<span class="badge bg-secondary">未建立</span>';
+                let approvedStatus = (schedule && schedule.isApproved) ? 
+                    '<i class="fas fa-check-circle text-success"></i>' : '<span class="text-muted">-</span>';
+                
                 let btnClass = 'btn-outline-primary';
                 let btnText = '開始排班';
                 
