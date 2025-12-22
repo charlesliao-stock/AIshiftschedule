@@ -9,10 +9,8 @@ export class SwapReviewPage {
 
     async render() {
         this.currentUser = authService.getProfile();
-        // 判斷是否為管理者 (模擬狀態下，此處會反映替身的角色)
         const role = this.currentUser?.role;
         const isManager = ['unit_manager', 'unit_scheduler', 'system_admin'].includes(role);
-        
         return SwapReviewTemplate.renderLayout(isManager);
     }
 
@@ -27,17 +25,13 @@ export class SwapReviewPage {
         const role = this.currentUser.role;
         const isManager = ['unit_manager', 'unit_scheduler', 'system_admin'].includes(role);
 
-        // 綁定刷新按鈕
         document.getElementById('btn-refresh').addEventListener('click', () => {
             this.loadTargetReviews();
             if(isManager) this.loadManagerReviews();
         });
 
-        // 初始載入
         this.loadTargetReviews();
-        if(isManager) {
-            this.loadManagerReviews();
-        }
+        if(isManager) this.loadManagerReviews();
     }
 
     async loadTargetReviews() {
@@ -56,7 +50,7 @@ export class SwapReviewPage {
     }
 
     async loadManagerReviews() {
-        // 使用替身的 unitId 載入資料
+        // 使用當前身分 (含模擬) 的 unitId 載入
         const list = await SwapService.getManagerPendingRequests(this.currentUser.unitId);
         const badge = document.getElementById('badge-manager-count');
         if(list.length > 0) {
@@ -68,7 +62,6 @@ export class SwapReviewPage {
         document.getElementById('manager-review-tbody').innerHTML = SwapReviewTemplate.renderManagerRows(list);
     }
 
-    // --- 操作 ---
     async handleTargetReview(id, action) {
         if(!confirm(action==='agree'?'同意換班？':'拒絕？')) return;
         await SwapService.reviewByTarget(id, action);
