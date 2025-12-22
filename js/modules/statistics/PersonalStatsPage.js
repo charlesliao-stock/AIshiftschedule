@@ -1,6 +1,6 @@
 import { ScheduleService } from "../../services/firebase/ScheduleService.js";
 import { authService } from "../../services/firebase/AuthService.js";
-import { StatisticsService } from "../../services/firebase/StatisticsService.js"; // 修正引用
+import { StatisticsService } from "../../services/StatisticsService.js"; // 修正引用
 import { PersonalStatsTemplate } from "./templates/PersonalStatsTemplate.js"; // 引入 Template
 
 export class PersonalStatsPage {
