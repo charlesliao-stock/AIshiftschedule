@@ -4,21 +4,17 @@ import { SwapApplyTemplate } from "./templates/SwapApplyTemplate.js";
 
 export class SwapApplyPage {
     constructor() {
-        this.currentUser = null;   // 當前身份 (含模擬)
+        this.currentUser = null;   
         this.targetUnitId = null;  
-        
-        this.pendingSwaps = [];    // 換班購物車
-        this.tempSource = null;    // 暫存來源
+        this.pendingSwaps = [];    
         this.isImpersonating = false; 
     }
 
     async render() {
-        // 直接渲染版面，移除管理員模擬區塊
         return SwapApplyTemplate.renderLayout();
     }
 
     async afterRender() {
-        // 1. 身分驗證
         let retries = 0;
         while (!authService.getProfile() && retries < 10) { await new Promise(r => setTimeout(r, 200)); retries++; }
         
@@ -29,14 +25,12 @@ export class SwapApplyPage {
         }
 
         this.targetUnitId = this.currentUser.unitId;
-        this.isImpersonating = !!this.currentUser.isImpersonating; // 標記是否為代操作
+        this.isImpersonating = !!this.currentUser.isImpersonating;
         window.routerPage = this;
 
-        // 綁定事件
         document.getElementById('btn-add-swap').addEventListener('click', () => this.addToCart());
         document.getElementById('btn-submit-swap').addEventListener('click', () => this.submitAll());
 
-        // 初始載入歷史紀錄
         this.loadHistory();
     }
 
@@ -44,8 +38,6 @@ export class SwapApplyPage {
         const list = await SwapService.getMyAppliedRequests(this.currentUser.uid);
         document.getElementById('history-tbody').innerHTML = SwapApplyTemplate.renderHistoryRows(list);
     }
-
-    // --- 購物車與提交邏輯 ---
 
     addToCart() {
         const date = document.getElementById('swap-date').value;
@@ -59,17 +51,10 @@ export class SwapApplyPage {
             return;
         }
 
-        // 這裡簡化流程：實務上應該要先搜尋 targetName 取得 uid
-        // 為了演示，我們假設 targetName 必須精準輸入，或後續擴充搜尋功能
-        // 暫時建立一個假物件，實際應呼叫 userService 搜尋
+        // 模擬的 target 物件，實際專案應實作 userService 搜尋
         const mockTarget = { uid: 'unknown', name: targetName, shift: targetShift, dateStr: targetDate };
 
-        this.pendingSwaps.push({
-            dateStr: date,
-            shift: shift,
-            target: mockTarget
-        });
-
+        this.pendingSwaps.push({ dateStr: date, shift: shift, target: mockTarget });
         this.renderCart();
         this.clearInputs();
     }
@@ -105,19 +90,17 @@ export class SwapApplyPage {
             const promises = this.pendingSwaps.map(item => {
                 return SwapService.createSwapRequest({
                     unitId: this.targetUnitId,
-                    year: new Date().getFullYear(), // 簡化：使用當前年份
+                    year: new Date().getFullYear(), 
                     month: new Date().getMonth() + 1,
                     requesterId: this.currentUser.uid,
                     requesterName: this.currentUser.name,
                     requesterDate: item.dateStr,
                     requesterShift: item.shift,
-                    // 注意：這裡需要真實的 targetUserId，若無則需在 addToCart 時實作搜尋
                     targetUserId: item.target.uid, 
                     targetUserName: item.target.name,
                     targetDate: item.target.dateStr,
                     targetShift: item.target.shift,
                     reason: finalReason,
-                    // 紀錄是否為代操作
                     createdByAdmin: this.isImpersonating ? this.currentUser.originalUid : null
                 });
             });
