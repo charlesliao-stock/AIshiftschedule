@@ -15,7 +15,6 @@ export class StaffListPage {
 
     async render() {
         let retries = 0;
-        // 等待 Auth 初始化
         while (!authService.getProfile() && retries < 10) { await new Promise(r => setTimeout(r, 200)); retries++; }
         this.currentUser = authService.getProfile();
         
@@ -25,13 +24,13 @@ export class StaffListPage {
         try {
             let units = [];
             
-            // 權限邏輯
+            // 模擬或一般權限判斷
             if (this.currentUser.isImpersonating) {
                 if (this.currentUser.unitId) {
                     const u = await UnitService.getUnitById(this.currentUser.unitId);
                     if(u) units = [u];
                 }
-                isSelectDisabled = true;
+                isSelectDisabled = true; // 鎖定
             }
             else if (this.currentUser.role === 'system_admin') {
                 units = await UnitService.getAllUnits();
@@ -59,30 +58,29 @@ export class StaffListPage {
 
         } catch (e) {
             console.error(e);
-            // 發生錯誤時，回傳錯誤 UI，此時頁面上不會有 Modal 元素
             return `<div class="alert alert-danger m-3">載入失敗: ${e.message}</div>`;
         }
     }
 
     async afterRender() {
-        // 🔴【關鍵修正】安全檢查
         const modalElement = document.getElementById('edit-staff-modal');
-        if (!modalElement) {
-            console.warn("⚠️ 找不到 Modal 元素，可能是 render() 發生錯誤顯示了錯誤訊息。");
-            return; // 直接中止，避免 Bootstrap 報錯
-        }
+        if (!modalElement) return;
 
         this.editModal = new bootstrap.Modal(modalElement);
         window.routerPage = this;
 
         const unitSelect = document.getElementById('unit-filter');
         
+        // 🔴 關鍵修正：確保選單有值，並強制載入資料
         if (unitSelect && unitSelect.options.length > 0) {
-            unitSelect.selectedIndex = 0;
-            this.loadData();
+            // 如果是被鎖定的 (只有一個選項)，強制選取第一個
+            if (unitSelect.options.length === 1 || unitSelect.disabled) {
+                unitSelect.selectedIndex = 0;
+            }
+            // 立即載入資料
+            await this.loadData();
         }
 
-        // 綁定事件 (加入 ? 檢查以免元素不存在時報錯)
         unitSelect?.addEventListener('change', () => this.loadData());
         
         document.getElementById('btn-add-staff')?.addEventListener('click', () => {
@@ -103,17 +101,23 @@ export class StaffListPage {
     async loadData() {
         const unitSelect = document.getElementById('unit-filter');
         const unitId = unitSelect ? unitSelect.value : null;
-        if(!unitId) return;
-
+        
         const tbody = document.getElementById('staff-tbody');
-        if(tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+        if(!tbody) return;
+
+        if(!unitId) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">請選擇單位</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
         try {
             this.staffList = await userService.getUsersByUnit(unitId);
-            this.applySort();
+            this.applySort(); // 這裡會負責渲染 tbody
         } catch (e) {
             console.error(e);
-            if(tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">載入失敗: ${e.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">載入失敗: ${e.message}</td></tr>`;
         }
     }
 
