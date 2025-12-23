@@ -1,4 +1,5 @@
 export const StaffListTemplate = {
+    // 1. 主畫面佈局
     renderLayout(unitOptionsHtml, isAdmin, isOneUnit) {
         return `
             <div class="container-fluid mt-4">
@@ -35,7 +36,7 @@ export const StaffListTemplate = {
                                         <th data-sort="level" style="cursor:pointer">職級 <i class="fas fa-sort text-muted small"></i></th>
                                         <th>系統權限</th>
                                         <th>特殊限制</th>
-                                        <th class="text-end pe-3">操作</th>
+                                        <th class="text-end pe-3" style="min-width: 160px;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="staff-tbody">
@@ -58,11 +59,11 @@ export const StaffListTemplate = {
                                 <div class="row g-3 mb-3">
                                     <div class="col-6">
                                         <label class="form-label fw-bold">姓名</label>
-                                        <input type="text" id="edit-staffName" class="form-control">
+                                        <input type="text" id="edit-staffName" class="form-control" placeholder="請輸入姓名">
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label fw-bold">編號</label>
-                                        <input type="text" id="edit-staffCode" class="form-control">
+                                        <input type="text" id="edit-staffCode" class="form-control" placeholder="請輸入編號">
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label">Email (登入帳號)</label>
@@ -145,17 +146,17 @@ export const StaffListTemplate = {
         return staffList.map(u => `
             <tr>
                 <td>${u.staffCode || '<span class="text-danger fw-bold">?</span>'}</td>
-                <td class="fw-bold">${u.staffName || '<span class="text-danger fw-bold">需資料庫修復</span>'}</td>
+                <td class="fw-bold">${u.staffName || '<span class="text-danger fw-bold">?</span>'}</td>
                 <td>${u.title || '-'}</td>
                 <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
                 <td>${this.renderRoles(u)}</td>
                 <td>${this.renderConstraints(u)}</td>
                 <td class="text-end">
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="window.routerPage.openEditModal('${u.uid}')">
+                    <button class="btn btn-sm btn-outline-primary me-1 btn-edit-staff" data-uid="${u.uid}" type="button">
                         <i class="fas fa-edit"></i> 編輯
                     </button>
                     ${isRealAdmin ? `
-                    <button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deleteStaff('${u.uid}')">
+                    <button class="btn btn-sm btn-outline-danger btn-delete-staff" data-uid="${u.uid}" type="button">
                         <i class="fas fa-trash"></i> 刪除
                     </button>` : ''}
                 </td>
