@@ -104,6 +104,21 @@ export class StaffListPage {
 
         document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
 
+        // ✅ 使用事件委派處理編輯和刪除按鈕
+        const tbody = document.getElementById('staff-tbody');
+        tbody?.addEventListener('click', (e) => {
+            const editBtn = e.target.closest('.btn-edit-staff');
+            const deleteBtn = e.target.closest('.btn-delete-staff');
+            
+            if (editBtn) {
+                const uid = editBtn.dataset.uid;
+                this.openEditModal(uid);
+            } else if (deleteBtn) {
+                const uid = deleteBtn.dataset.uid;
+                this.deleteStaff(uid);
+            }
+        });
+
         if (targetUnitId) await this.loadData(targetUnitId);
     }
 
