@@ -144,8 +144,8 @@ export const StaffListTemplate = {
         
         return staffList.map(u => `
             <tr>
-                <td>${u.staffCode}</td>
-                <td class="fw-bold">${u.staffName}</td>
+                <td>${u.staffCode || '<span class="text-danger">缺編號</span>'}</td>
+                <td class="fw-bold">${u.staffName || '<span class="text-danger">缺姓名</span>'}</td>
                 <td>${u.title || '-'}</td>
                 <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
                 <td>${this.renderRoles(u)}</td>
