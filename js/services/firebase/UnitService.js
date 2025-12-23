@@ -1,130 +1,32 @@
 import { 
     collection, doc, setDoc, getDoc, updateDoc, deleteDoc, 
-    getDocs, query, where, serverTimestamp, writeBatch 
+    getDocs, query, where, serverTimestamp 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { firebaseService } from "./FirebaseService.js";
 
 export class UnitService {
     
     static COLLECTION_NAME = 'units';
-    
-    // ✅ 新增：快取容器
-    static _cache = new Map( );
-    static CACHE_DURATION = 300000; // 5分鐘 (毫秒)
 
-    // ✅ 新增：帶快取的讀取方法 (用於 AI 排班等頻繁讀取場景)
-    static async getUnitByIdWithCache(unitId) {
-        const now = Date.now();
-        
-        if (this._cache.has(unitId)) {
-            const cached = this._cache.get(unitId);
-            if (now - cached.timestamp < this.CACHE_DURATION) {
-                console.log(`[UnitService] 使用快取讀取單位: ${unitId}`);
-                return cached.data;
-            }
-        }
-
-        // 若無快取或過期，執行正常讀取
-        const data = await this.getUnitById(unitId);
-        if (data) {
-            this._cache.set(unitId, { data: data, timestamp: now });
-        }
-        return data;
-    }
-
-    // 清除快取 (例如更新設定後呼叫)
-    static clearCache(unitId) {
-        if(unitId) this._cache.delete(unitId);
-        else this._cache.clear();
-    }
-
-    static async createUnit(unitData) {
-        try {
-            const db = firebaseService.getDb();
-            const newUnitRef = doc(collection(db, UnitService.COLLECTION_NAME));
-            const existing = await UnitService.getUnitByCode(unitData.unitCode);
-            if (existing) return { success: false, error: `單位代號 ${unitData.unitCode} 已存在` };
-
-            const dataToSave = {
-                ...unitData,
-                unitId: newUnitRef.id,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                status: 'active',
-                managers: unitData.managers || [],
-                schedulers: [],
-                settings: { shifts: [], rules: {} }
-            };
-            await setDoc(newUnitRef, dataToSave);
-            return { success: true, unitId: newUnitRef.id };
-        } catch (error) { return { success: false, error: error.message }; }
-    }
-
-    static async updateUnit(unitId, updateData) {
-        try {
-            const db = firebaseService.getDb();
-            const unitRef = doc(db, UnitService.COLLECTION_NAME, unitId);
-            await updateDoc(unitRef, { ...updateData, updatedAt: serverTimestamp() });
-            
-            // ✅ 更新後清除該單位快取，確保下次讀到最新資料
-            this.clearCache(unitId);
-            
-            return { success: true };
-        } catch (error) { return { success: false, error: error.message }; }
-    }
-
-    static async deleteUnit(unitId) {
-        try {
-            const db = firebaseService.getDb();
-            await deleteDoc(doc(db, UnitService.COLLECTION_NAME, unitId));
-            this.clearCache(unitId); // 清除快取
-            return { success: true };
-        } catch (error) { return { success: false, error: error.message }; }
-    }
-
+    // 取得所有單位 (強制回傳 unitId)
     static async getAllUnits() {
         try {
             const db = firebaseService.getDb();
             const q = query(collection(db, UnitService.COLLECTION_NAME));
             const querySnapshot = await getDocs(q);
             const units = [];
-            querySnapshot.forEach((doc) => units.push({ id: doc.id, ...doc.data() })); 
+            querySnapshot.forEach((doc) => {
+                // ✅ 標準化: 直接賦予 unitId
+                units.push({ unitId: doc.id, ...doc.data() });
+            });
             return units;
-        } catch (error) { return []; }
-    }
-
-    static async getUnitById(unitId) {
-        try {
-            const db = firebaseService.getDb();
-            const docSnap = await getDoc(doc(db, UnitService.COLLECTION_NAME, unitId));
-            return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
-        } catch (error) { return null; }
-    }
-
-    // 新增：取得單位設定 (用於 RuleSettings)
-    static async getUnitSettings(unitId) {
-        const unit = await this.getUnitByIdWithCache(unitId);
-        if (unit && unit.settings) {
-            return unit.settings;
-        }
-        // 返回預設結構，防止 RuleSettings 崩潰
-        return { rules: {}, strategyWeights: {}, strategyPreset: 'A' };
-    }
-
-    // 新增：更新單位設定 (用於 RuleSettings)
-    static async updateUnitSettings(unitId, newSettings) {
-        try {
-            // 由於 Firestore 支援巢狀欄位更新，我們可以直接更新 settings 欄位
-            const updateData = {
-                settings: newSettings
-            };
-            const result = await this.updateUnit(unitId, updateData);
-            return result;
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error("Get all units failed:", error);
+            return [];
         }
     }
 
+    // 根據管理者 ID 取得單位
     static async getUnitsByManager(managerId) {
         try {
             const db = firebaseService.getDb();
@@ -134,7 +36,10 @@ export class UnitService {
             );
             const querySnapshot = await getDocs(q);
             const units = [];
-            querySnapshot.forEach((doc) => units.push({ id: doc.id, ...doc.data() }));
+            querySnapshot.forEach((doc) => {
+                // ✅ 標準化
+                units.push({ unitId: doc.id, ...doc.data() });
+            });
             return units;
         } catch (error) {
             console.error("Get units by manager failed:", error);
@@ -142,11 +47,52 @@ export class UnitService {
         }
     }
 
-    static async getUnitByCode(code) {
-        const db = firebaseService.getDb();
-        const q = query(collection(db, UnitService.COLLECTION_NAME), where("unitCode", "==", code));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) return { unitId: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-        return null;
+    // 根據 ID 取得單一單位
+    static async getUnitById(unitId) { // 參數名也統一
+        if (!unitId) return null;
+        try {
+            const db = firebaseService.getDb();
+            const docRef = doc(db, UnitService.COLLECTION_NAME, unitId);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                // ✅ 標準化
+                return { unitId: docSnap.id, ...docSnap.data() };
+            } else {
+                return null;
+            }
+        } catch (error) {
+            console.error("Get unit by ID failed:", error);
+            return null;
+        }
+    }
+
+    // 建立單位 (回傳 unitId)
+    static async createUnit(data) {
+        try {
+            const db = firebaseService.getDb();
+            const newDocRef = doc(collection(db, UnitService.COLLECTION_NAME));
+            await setDoc(newDocRef, {
+                ...data,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+            });
+            return { success: true, unitId: newDocRef.id };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+
+    static async updateUnit(unitId, data) {
+        try {
+            const db = firebaseService.getDb();
+            const docRef = doc(db, UnitService.COLLECTION_NAME, unitId);
+            await updateDoc(docRef, {
+                ...data,
+                updatedAt: serverTimestamp()
+            });
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
     }
 }
