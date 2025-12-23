@@ -1,9 +1,10 @@
 import { userService } from "../../services/firebase/UserService.js";
 import { UnitService } from "../../services/firebase/UnitService.js";
-import { StaffCreateTemplate } from "./templates/StaffCreateTemplate.js"; // 引入 Template
+import { StaffCreateTemplate } from "./templates/StaffCreateTemplate.js"; 
 
 export class StaffCreatePage {
     async render() {
+        // ✅ 讀取 unitId (Service 已保證提供)
         const units = await UnitService.getAllUnits();
         const unitOptions = units.map(u => 
             `<option value="${u.unitId}">${u.unitName} (${u.unitCode})</option>`
@@ -29,15 +30,16 @@ export class StaffCreatePage {
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 建立中...';
             
+            // ✅ 建構標準資料物件
             const staffData = {
-                name: document.getElementById('staffName').value.trim(),
-                staffId: document.getElementById('staffId').value.trim(),
-                title: document.getElementById('title').value,
-                unitId: document.getElementById('unitId').value,
+                staffName: document.getElementById('staffName').value.trim(),
+                staffCode: document.getElementById('staffCode').value.trim(),
                 email: document.getElementById('email').value.trim(),
-                hireDate: document.getElementById('hireDate').value || null,
-                isManager: managerCheck.checked,
-                isScheduler: schedulerCheck.checked,
+                unitId: document.getElementById('unitSelect').value || "", 
+                title: document.getElementById('title').value,
+                level: document.getElementById('level').value,
+                role: managerCheck.checked ? 'unit_manager' : (schedulerCheck.checked ? 'unit_scheduler' : 'user'),
+                
                 constraints: {
                     maxConsecutive: parseInt(document.getElementById('maxConsecutive').value) || 6,
                     maxConsecutiveNights: parseInt(document.getElementById('maxConsecutiveNights').value) || 4, 
