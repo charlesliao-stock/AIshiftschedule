@@ -34,16 +34,28 @@ export const userService = {
 
     async updateLastLogin(uid) {
         try {
-            if (!db) return;
-            await updateDoc(doc(db, "users", uid), { lastLogin: serverTimestamp() });
+            if (!db || !uid) return;
+            await updateDoc(doc(db, "users", uid), { lastLoginAt: serverTimestamp() });
         } catch (e) {}
     },
     
+    // 建立新人員 (核心修改)
     async createStaff(data, password) {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, data.email, password);
             const uid = userCredential.user.uid;
-            await setDoc(doc(db, "users", uid), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            
+            // ✅ 使用新標準欄位: staffName, staffCode
+            // 這裡 data 應該已經包含新欄位，但為了保險我們做個映射或檢查
+            const payload = {
+                ...data,
+                // 確保寫入 unitId (若無則空字串)
+                unitId: data.unitId || "", 
+                createdAt: serverTimestamp(), 
+                updatedAt: serverTimestamp() 
+            };
+
+            await setDoc(doc(db, "users", uid), payload);
             return { success: true, uid: uid };
         } catch (error) { return { success: false, error: error.message }; }
     },
@@ -65,14 +77,16 @@ export const userService = {
     async getUnitStaff(unitId) { return this.getUsersByUnit(unitId); },
     async getAllStaffCount() { const list = await this.getAllUsers(); return list.length; },
     
-    // ✅ 關鍵修復：搜尋功能 (全域搜尋)
+    // ✅ 關鍵修復：搜尋功能 (配合新欄位)
     async searchUsers(keyword) {
         const list = await this.getAllUsers();
         if (!keyword) return [];
         const k = keyword.toLowerCase();
+        
         return list.filter(u => 
-            (u.name && u.name.toLowerCase().includes(k)) || 
-            (u.staffId && String(u.staffId).toLowerCase().includes(k)) // 強制轉型 String 避免數字報錯
+            // 優先搜尋新欄位，但也相容舊資料 (u.name) 以防萬一
+            ((u.staffName && u.staffName.toLowerCase().includes(k)) || (u.name && u.name.toLowerCase().includes(k))) || 
+            ((u.staffCode && String(u.staffCode).toLowerCase().includes(k)) || (u.staffId && String(u.staffId).toLowerCase().includes(k)))
         );
     }
 };
