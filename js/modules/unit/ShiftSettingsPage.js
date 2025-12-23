@@ -18,7 +18,7 @@ export class ShiftSettingsPage {
         
         let availableUnits = [];
         
-        // 🔴 加入鎖定邏輯
+        // 🔴 修正：加入模擬狀態鎖定
         if (user.isImpersonating) {
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
@@ -26,7 +26,7 @@ export class ShiftSettingsPage {
             }
             unitSelect.disabled = true; // 鎖定!
         }
-        else if (user.role === 'system_admin' || user.originalRole === 'system_admin') {
+        else if (user.role === 'system_admin') {
             availableUnits = await UnitService.getAllUnits();
             unitSelect.disabled = false;
         } else {
@@ -45,7 +45,7 @@ export class ShiftSettingsPage {
             unitSelect.innerHTML = availableUnits.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
             
             // 預設選取
-            if(user.isImpersonating) {
+            if (user.isImpersonating) {
                 this.targetUnitId = user.unitId;
             } else {
                 this.targetUnitId = availableUnits[0].unitId;
@@ -71,8 +71,52 @@ export class ShiftSettingsPage {
         document.getElementById('table-body').innerHTML = ShiftSettingsTemplate.renderRows(this.shifts);
     }
     
-    // ... 其餘方法保持不變 ...
-    openModal(idx = -1) { /* ... */ this.modal.show(); }
-    async saveShift() { /* ... */ }
-    async deleteShift(idx) { /* ... */ }
+    openModal(idx = -1) {
+        document.getElementById('edit-idx').value = idx;
+        if (idx >= 0) {
+            const s = this.shifts[idx];
+            document.getElementById('shift-code').value = s.code;
+            document.getElementById('shift-name').value = s.name;
+            document.getElementById('shift-color').value = s.color;
+            document.getElementById('start-time').value = s.startTime;
+            document.getElementById('end-time').value = s.endTime;
+            document.getElementById('shift-hours').value = s.hours || 8;
+        } else {
+            document.getElementById('shift-code').value = '';
+            document.getElementById('shift-name').value = '';
+            document.getElementById('shift-color').value = '#3b82f6';
+            document.getElementById('start-time').value = '08:00';
+            document.getElementById('end-time').value = '16:00';
+            document.getElementById('shift-hours').value = 8;
+        }
+        this.modal.show();
+    }
+
+    async saveShift() {
+        const idx = parseInt(document.getElementById('edit-idx').value);
+        const hoursInput = document.getElementById('shift-hours').value;
+        const hours = (hoursInput === '0' || hoursInput === 0) ? 0 : (parseFloat(hoursInput) || 0);
+
+        const data = { 
+            code: document.getElementById('shift-code').value, 
+            name: document.getElementById('shift-name').value, 
+            color: document.getElementById('shift-color').value, 
+            startTime: document.getElementById('start-time').value, 
+            endTime: document.getElementById('end-time').value,
+            hours: hours
+        };
+        if(idx === -1) this.shifts.push(data); else this.shifts[idx] = data;
+        
+        await UnitService.updateUnit(this.targetUnitId, { "settings.shifts": this.shifts });
+        this.modal.hide(); 
+        document.getElementById('table-body').innerHTML = ShiftSettingsTemplate.renderRows(this.shifts);
+    }
+    
+    async deleteShift(idx) { 
+        if(confirm('刪除？')) { 
+            this.shifts.splice(idx, 1); 
+            await UnitService.updateUnit(this.targetUnitId, { "settings.shifts": this.shifts }); 
+            document.getElementById('table-body').innerHTML = ShiftSettingsTemplate.renderRows(this.shifts);
+        } 
+    }
 }
