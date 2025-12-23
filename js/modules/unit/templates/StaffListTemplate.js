@@ -1,5 +1,4 @@
 export const StaffListTemplate = {
-    // 1. 主畫面佈局 (保持您要的舊版樣式)
     renderLayout(unitOptionsHtml, isAdmin, isOneUnit) {
         return `
             <div class="container-fluid mt-4">
@@ -152,8 +151,13 @@ export const StaffListTemplate = {
                 <td>${this.renderRoles(u)}</td>
                 <td>${this.renderConstraints(u)}</td>
                 <td class="text-end">
-                    <button class="btn btn-sm btn-outline-primary me-1 btn-edit-staff" data-uid="${u.uid}"><i class="fas fa-edit"></i></button>
-                    ${isRealAdmin ? `<button class="btn btn-sm btn-outline-danger btn-delete-staff" data-uid="${u.uid}"><i class="fas fa-trash"></i></button>` : ''}
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="window.routerPage.openEditModal('${u.uid}')">
+                        <i class="fas fa-edit"></i> 編輯
+                    </button>
+                    ${isRealAdmin ? `
+                    <button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deleteStaff('${u.uid}')">
+                        <i class="fas fa-trash"></i> 刪除
+                    </button>` : ''}
                 </td>
             </tr>
         `).join('');
