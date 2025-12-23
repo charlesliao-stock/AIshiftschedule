@@ -30,140 +30,87 @@ export const StaffListTemplate = {
                             <table class="table table-hover align-middle mb-0">
                                 <thead class="table-light">
                                     <tr>
-                                        ${this.renderSortHeader('單位', 'unitId')}
-                                        ${this.renderSortHeader('編號', 'staffId')}
-                                        ${this.renderSortHeader('姓名', 'name')}
-                                        ${this.renderSortHeader('職級', 'rank')}
-                                        <th>組別</th>
-                                        <th>Email</th>
-                                        <th>角色</th>
+                                        <th data-sort="staffId" style="cursor:pointer">編號 <i class="fas fa-sort text-muted small"></i></th>
+                                        <th data-sort="name" style="cursor:pointer">姓名 <i class="fas fa-sort text-muted small"></i></th>
+                                        <th data-sort="title" style="cursor:pointer">職稱 <i class="fas fa-sort text-muted small"></i></th>
+                                        <th data-sort="level" style="cursor:pointer">職級 <i class="fas fa-sort text-muted small"></i></th>
+                                        <th>系統權限</th>
+                                        <th>特殊限制</th>
                                         <th class="text-end pe-3">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="staff-tbody">
-                                    <tr><td colspan="8" class="text-center py-5 text-muted">準備載入...</td></tr>
+                                    <tr><td colspan="7" class="text-center py-4 text-muted">載入中...</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-            </div>
-        `;
-    },
 
-    renderSortHeader(label, key) {
-        return `<th class="sortable-th" style="cursor:pointer; user-select:none;" onclick="window.routerPage.handleSort('${key}')">${label} <i class="fas fa-sort text-muted opacity-25"></i></th>`;
-    },
-
-    // 2. 表格行渲染
-    renderRows(displayList, unitMap) {
-        if (displayList.length === 0) {
-            return '<tr><td colspan="8" class="text-center text-muted py-5">無資料</td></tr>';
-        }
-
-        const getRoleLabel = (role) => {
-            if(role==='unit_manager') return '<span class="badge bg-primary">管理者</span>';
-            if(role==='unit_scheduler') return '<span class="badge bg-info text-dark">排班者</span>';
-            return '<span class="badge bg-secondary">一般</span>';
-        };
-
-        return displayList.map(u => `
-            <tr>
-                <td>${unitMap[u.unitId] || u.unitId}</td>
-                <td>${u.staffId || '-'}</td>
-                <td class="fw-bold">${u.name}</td>
-                <td><span class="badge bg-light text-dark border">${u.rank}</span></td>
-                <td>${u.group || '-'}</td>
-                <td>${u.email}</td>
-                <td>${getRoleLabel(u.role)}</td>
-                <td class="text-end pe-3">
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="window.routerPage.openModal('${u.uid}')"><i class="fas fa-edit"></i></button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deleteStaff('${u.uid}')"><i class="fas fa-trash"></i></button>
-                </td>
-            </tr>
-        `).join('');
-    },
-
-    // 3. Modal 結構
-    renderModalHtml(isAdmin) {
-        return `
-            <div class="modal fade" id="staff-modal" tabindex="-1">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title fw-bold" id="modal-title">新增人員</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <form id="staff-form">
+                <div class="modal fade" id="edit-staff-modal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header bg-light">
+                                <h5 class="modal-title fw-bold">編輯人員資料</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
                                 <input type="hidden" id="edit-uid">
                                 <div class="row g-3 mb-3">
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">所屬單位</label>
-                                        <select id="edit-unit" class="form-select" ${!isAdmin ? 'disabled' : ''}></select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">員工編號</label>
-                                        <input type="text" id="edit-staffId" class="form-control" required>
-                                    </div>
-                                </div>
-                                <div class="row g-3 mb-3">
-                                    <div class="col-md-6">
+                                    <div class="col-6">
                                         <label class="form-label fw-bold">姓名</label>
-                                        <input type="text" id="edit-name" class="form-control" required>
+                                        <input type="text" id="edit-name" class="form-control">
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">Email</label>
-                                        <input type="email" id="edit-email" class="form-control" required>
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold">編號</label>
+                                        <input type="text" id="edit-staffId" class="form-control bg-light" readonly>
                                     </div>
-                                </div>
-                                <div class="row g-3 mb-3">
-                                    <div class="col-md-6">
+                                    <div class="col-12">
+                                        <label class="form-label">Email (登入帳號)</label>
+                                        <input type="email" id="edit-email" class="form-control bg-light" readonly>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label fw-bold">職稱</label>
+                                        <select id="edit-title" class="form-select">
+                                            <option value="NP">專科護理師 (NP)</option>
+                                            <option value="HN">護理長 (HN)</option>
+                                            <option value="N">護理師 (N)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6">
                                         <label class="form-label fw-bold">職級</label>
                                         <select id="edit-level" class="form-select">
-                                            <option value="N0">N0</option><option value="N1">N1</option><option value="N2">N2</option>
-                                            <option value="N3">N3</option><option value="N4">N4</option><option value="AHN">AHN</option>
-                                            <option value="HN">HN</option><option value="NP">NP</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-bold">組別</label>
-                                        <select id="edit-group" class="form-select">
-                                            <option value="">(載入中...)</option>
+                                            <option value="N0">N0</option><option value="N1">N1</option>
+                                            <option value="N2">N2</option><option value="N3">N3</option>
+                                            <option value="N4">N4</option>
                                         </select>
                                     </div>
                                 </div>
-                                
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold">到職日期</label>
-                                    <input type="date" id="edit-hireDate" class="form-control">
-                                </div>
-
                                 <hr>
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold text-primary">排班參數 (母性保護)</label>
-                                    <div class="row g-2 mb-2">
+                                    <label class="form-label fw-bold text-primary">排班限制</label>
+                                    <div class="row g-2">
                                         <div class="col-6">
-                                            <label class="small text-muted">連上上限</label>
+                                            <label class="small text-muted">連上上限 (天)</label>
                                             <input type="number" id="edit-maxConsecutive" class="form-control form-control-sm" min="1">
                                         </div>
                                         <div class="col-6">
-                                            <label class="small text-muted">連夜上限</label>
+                                            <label class="small text-muted">連夜上限 (天)</label>
                                             <input type="number" id="edit-maxConsecutiveNights" class="form-control form-control-sm" min="1">
                                         </div>
-                                    </div>
-                                    <div class="d-flex gap-3 mt-2">
-                                        <div class="form-check">
-                                            <input type="checkbox" id="edit-isPregnant" class="form-check-input">
-                                            <label class="form-check-label text-danger fw-bold">懷孕</label>
-                                        </div>
-                                        <div class="form-check">
-                                            <input type="checkbox" id="edit-isPostpartum" class="form-check-input">
-                                            <label class="form-check-label text-danger fw-bold">產後哺乳</label>
-                                        </div>
-                                        <div class="form-check ms-auto">
-                                            <input type="checkbox" id="edit-canBatch" class="form-check-input">
-                                            <label class="form-check-label text-muted">可包班</label>
+                                        <div class="col-12 mt-2">
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox" id="edit-canBatch">
+                                                <label class="form-check-label small">可包班</label>
+                                            </div>
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox" id="edit-isPregnant">
+                                                <label class="form-check-label small">懷孕中</label>
+                                            </div>
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox" id="edit-isPostpartum">
+                                                <label class="form-check-label small">產後哺乳</label>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="form-text small text-danger">※ 懷孕或產後哺乳者，系統將強制不排 22:00 後的班別。</div>
@@ -181,15 +128,55 @@ export const StaffListTemplate = {
                                         </div>
                                     </div>
                                 </div>
-                            </form>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary w-auto" data-bs-dismiss="modal">取消</button>
-                            <button type="button" id="btn-save" class="btn btn-primary w-auto">儲存</button>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary w-auto" data-bs-dismiss="modal">取消</button>
+                                <button type="button" id="btn-save" class="btn btn-primary w-auto">儲存</button>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         `;
+    },
+
+    // 2. 渲染列表列 (補上缺少的邏輯)
+    renderRows(staffList, isRealAdmin) {
+        if (!staffList || staffList.length === 0) return '<tr><td colspan="7" class="text-center text-muted p-4">無人員資料</td></tr>';
+        
+        return staffList.map(u => `
+            <tr>
+                <td>${u.staffId || '-'}</td>
+                <td class="fw-bold">${u.name}</td>
+                <td>${u.title || '-'}</td>
+                <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
+                <td>${this.renderRoles(u)}</td>
+                <td>${this.renderConstraints(u)}</td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="window.routerPage.openEditModal('${u.uid}')"><i class="fas fa-edit"></i></button>
+                    ${isRealAdmin ? `<button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deleteStaff('${u.uid}')"><i class="fas fa-trash"></i></button>` : ''}
+                </td>
+            </tr>
+        `).join('');
+    },
+
+    // 3. 輔助渲染：權限
+    renderRoles(u) {
+        let roles = [];
+        if (u.role === 'unit_manager') roles.push('<span class="badge bg-danger">主管</span>');
+        if (u.role === 'unit_scheduler') roles.push('<span class="badge bg-success">排班</span>');
+        if (u.role === 'system_admin') roles.push('<span class="badge bg-dark">系統</span>');
+        if (roles.length === 0) roles.push('<span class="badge bg-light text-muted border">一般</span>');
+        return roles.join(' ');
+    },
+
+    // 4. 輔助渲染：限制
+    renderConstraints(u) {
+        let tags = [];
+        const c = u.constraints || {};
+        if (c.isPregnant) tags.push('<i class="fas fa-baby text-danger" title="懷孕"></i>');
+        if (c.isPostpartum) tags.push('<i class="fas fa-breastfeeding text-pink" title="哺乳"></i>');
+        if (c.canBatch) tags.push('<span class="badge rounded-pill bg-info text-dark" style="font-size:0.6rem">包班</span>');
+        return tags.length > 0 ? tags.join(' ') : '<span class="text-muted">-</span>';
     }
 };
