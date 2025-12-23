@@ -12,7 +12,6 @@ export class StaffListPage {
         this.displayList = [];
         this.currentUser = null;
         this.editModal = null;
-        // ✅ [標準化] 預設排序使用標準欄位
         this.sortConfig = { key: 'staffCode', direction: 'asc' };
     }
 
@@ -54,10 +53,10 @@ export class StaffListPage {
 
             const isRealAdmin = (this.currentUser.role === 'system_admin' && !this.currentUser.isImpersonating);
             
-            // 取得標準介面
+            // 取得 HTML
             let html = StaffListTemplate.renderLayout(unitOptionsHtml, isRealAdmin, isSelectDisabled);
             
-            // ✅ [工具] 插入「資料修復按鈕」 (僅在開發/維護期使用)
+            // ✅ [工具] 插入「資料修復按鈕」，點此按鈕可解決 undefined 問題
             if (isRealAdmin) {
                 const migrationBtn = `<button id="btn-migration" class="btn btn-warning text-dark fw-bold ms-2"><i class="fas fa-wrench"></i> 修復資料庫欄位</button>`;
                 html = html.replace('新增人員\n                        </button>', '新增人員</button>' + migrationBtn);
@@ -72,14 +71,16 @@ export class StaffListPage {
     }
 
     async afterRender() {
-        // ✅ 優先綁定，防止報錯導致按鈕失效
+        // ✅ 1. 最優先綁定 Router，防止按鈕找不到 window.routerPage
         window.routerPage = this;
 
+        // ✅ 2. 初始化 Modal
         const modalElement = document.getElementById('edit-staff-modal');
         if (modalElement) {
             this.editModal = new bootstrap.Modal(modalElement);
         }
 
+        // ✅ 3. 處理下拉選單預設值
         const unitSelect = document.getElementById('unit-filter');
         let targetUnitId = null;
 
@@ -93,17 +94,36 @@ export class StaffListPage {
             unitSelect.value = targetUnitId;
         }
 
+        // ✅ 4. 綁定事件
         unitSelect?.addEventListener('change', (e) => this.loadData(e.target.value));
         
         document.getElementById('btn-add-staff')?.addEventListener('click', () => { window.location.hash = '/unit/staff/create'; });
         document.getElementById('keyword-search')?.addEventListener('input', (e) => { this.filterData(e.target.value); });
         document.getElementById('btn-save')?.addEventListener('click', () => this.saveEdit());
         
-        // 綁定修復按鈕
+        // 綁定修復工具按鈕
         document.getElementById('btn-migration')?.addEventListener('click', () => this.runMigration());
 
         document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
 
+        // ✅ 5. [關鍵] 使用事件委派 (Event Delegation) 處理編輯/刪除按鈕
+        // 這樣可以避免因為表格重新渲染導致按鈕事件遺失
+        const tbody = document.getElementById('staff-tbody');
+        tbody?.addEventListener('click', (e) => {
+            // 往上尋找是否點擊了帶有特定 class 的按鈕
+            const editBtn = e.target.closest('.btn-edit-staff');
+            const deleteBtn = e.target.closest('.btn-delete-staff');
+            
+            if (editBtn) {
+                const uid = editBtn.dataset.uid;
+                this.openEditModal(uid);
+            } else if (deleteBtn) {
+                const uid = deleteBtn.dataset.uid;
+                this.deleteStaff(uid);
+            }
+        });
+
+        // 載入資料
         if (targetUnitId) await this.loadData(targetUnitId);
     }
 
@@ -127,7 +147,6 @@ export class StaffListPage {
     applySort() {
         if (!this.staffList) this.staffList = [];
         this.displayList = [...this.staffList].sort((a, b) => {
-            // ✅ [潔癖化] 只讀取標準欄位
             let valA = a[this.sortConfig.key] || '';
             let valB = b[this.sortConfig.key] || '';
             return this.sortConfig.direction === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
@@ -139,7 +158,6 @@ export class StaffListPage {
         if (!keyword) { this.applySort(); return; }
         const k = keyword.toLowerCase();
         this.displayList = this.staffList.filter(s => 
-            // ✅ [潔癖化] 只搜尋標準欄位
             (s.staffName && s.staffName.toLowerCase().includes(k)) || 
             (s.staffCode && String(s.staffCode).toLowerCase().includes(k))
         );
@@ -150,15 +168,17 @@ export class StaffListPage {
         const tbody = document.getElementById('staff-tbody');
         if(!tbody) return;
         const isRealAdmin = (this.currentUser.role === 'system_admin' && !this.currentUser.isImpersonating);
+        // 使用 Template 渲染
         tbody.innerHTML = StaffListTemplate.renderRows(this.displayList, isRealAdmin);
     }
     
+    // 開啟編輯視窗
     openEditModal(uid) {
         const user = this.staffList.find(u => u.uid === uid);
         if(!user) return;
         
         document.getElementById('edit-uid').value = uid;
-        // ✅ [潔癖化] 只讀取標準欄位 (如果是舊資料，這裡會是空白，強迫您用修復按鈕)
+        // ✅ 讀取資料
         document.getElementById('edit-staffName').value = user.staffName || '';
         document.getElementById('edit-staffCode').value = user.staffCode || '';
         
@@ -178,12 +198,13 @@ export class StaffListPage {
         this.editModal.show();
     }
 
+    // 儲存編輯
     async saveEdit() {
         const uid = document.getElementById('edit-uid').value;
         const btn = document.getElementById('btn-save');
         
         const data = {
-            // ✅ [標準化] 寫入標準欄位
+            // ✅ 寫入資料
             staffName: document.getElementById('edit-staffName').value,
             staffCode: document.getElementById('edit-staffCode').value,
             
@@ -225,7 +246,7 @@ export class StaffListPage {
         }
     }
 
-    // ✅ 內建資料庫修復工具 (按鈕觸發)
+    // ✅ 資料庫修復邏輯
     async runMigration() {
         if(!confirm("確定要執行資料庫欄位升級嗎？\n這將把 name/staffId 轉換為 staffName/staffCode，並刪除舊欄位。")) return;
         
