@@ -1,5 +1,4 @@
 export const StaffListTemplate = {
-    // 1. 主畫面佈局
     renderLayout(unitOptionsHtml, isAdmin, isOneUnit) {
         return `
             <div class="container-fluid mt-4">
@@ -15,9 +14,13 @@ export const StaffListTemplate = {
                             ${unitOptionsHtml}
                         </select>
                         <div class="vr mx-2"></div>
+                        
                         <button id="btn-add-staff" class="btn btn-primary w-auto text-nowrap">
                             <i class="fas fa-plus"></i> 新增人員
                         </button>
+
+                        ${isAdmin ? `<button id="btn-check-db" class="btn btn-warning text-dark fw-bold ms-1"><i class="fas fa-search"></i> 檢查資料庫狀態</button>` : ''}
+                        
                         <div class="ms-auto">
                             <input type="text" id="keyword-search" class="form-control form-control-sm" placeholder="搜尋姓名/編號...">
                         </div>
@@ -146,17 +149,17 @@ export const StaffListTemplate = {
         return staffList.map(u => `
             <tr>
                 <td>${u.staffCode || '<span class="text-danger fw-bold">?</span>'}</td>
-                <td class="fw-bold">${u.staffName || '<span class="text-danger fw-bold">?</span>'}</td>
+                <td class="fw-bold">${u.staffName || '<span class="text-danger fw-bold">需資料庫修復</span>'}</td>
                 <td>${u.title || '-'}</td>
                 <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
                 <td>${this.renderRoles(u)}</td>
                 <td>${this.renderConstraints(u)}</td>
                 <td class="text-end">
-                    <button class="btn btn-sm btn-outline-primary me-1 btn-edit-staff" data-uid="${u.uid}" type="button">
+                    <button class="btn btn-sm btn-outline-primary me-1 btn-edit" data-uid="${u.uid}">
                         <i class="fas fa-edit"></i> 編輯
                     </button>
                     ${isRealAdmin ? `
-                    <button class="btn btn-sm btn-outline-danger btn-delete-staff" data-uid="${u.uid}" type="button">
+                    <button class="btn btn-sm btn-outline-danger btn-delete" data-uid="${u.uid}">
                         <i class="fas fa-trash"></i> 刪除
                     </button>` : ''}
                 </td>
