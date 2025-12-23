@@ -77,7 +77,7 @@ export class GroupSettingsPage {
             this.groups = unit?.groups || [];
             this.staffList = await userService.getUsersByUnit(unitId);
             
-            // ✅ [修正] 使用新標準 staffCode 進行排序
+            // ✅ [修正] 使用新標準 staffCode 排序
             this.staffList.sort((a,b) => (a.staffCode || '').localeCompare(b.staffCode || ''));
             
             document.getElementById('group-list').innerHTML = GroupSettingsTemplate.renderGroupList(this.groups);
