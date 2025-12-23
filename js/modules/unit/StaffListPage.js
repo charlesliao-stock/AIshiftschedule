@@ -9,7 +9,6 @@ export class StaffListPage {
         this.displayList = [];
         this.currentUser = null;
         this.editModal = null;
-        // ✅ 排序鍵值標準化
         this.sortConfig = { key: 'staffCode', direction: 'asc' };
     }
 
@@ -41,11 +40,10 @@ export class StaffListPage {
                 }
             }
 
-            // ✅ 移除正規化 map (Service 已處理)
             if (units.length === 0) {
                 unitOptionsHtml = '<option value="">無權限</option>';
             } else {
-                // ✅ 直接讀取 unitId
+                // ✅ 純淨版: 直接讀 unitId
                 unitOptionsHtml = units.map(u => 
                     `<option value="${u.unitId}">${u.unitName} (${u.unitCode || '-'})</option>`
                 ).join('');
@@ -82,7 +80,10 @@ export class StaffListPage {
         
         document.getElementById('btn-add-staff')?.addEventListener('click', () => { window.location.hash = '/unit/staff/create'; });
         document.getElementById('keyword-search')?.addEventListener('input', (e) => { this.filterData(e.target.value); });
+        
+        // 綁定儲存按鈕
         document.getElementById('btn-save')?.addEventListener('click', () => this.saveEdit());
+        
         document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
 
         if (targetUnitId) await this.loadData(targetUnitId);
@@ -109,7 +110,6 @@ export class StaffListPage {
     applySort() {
         if (!this.staffList) this.staffList = [];
         this.displayList = [...this.staffList].sort((a, b) => {
-            // ✅ 使用標準欄位
             let valA = a[this.sortConfig.key] || '';
             let valB = b[this.sortConfig.key] || '';
             return this.sortConfig.direction === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
@@ -121,7 +121,7 @@ export class StaffListPage {
         if (!keyword) { this.applySort(); return; }
         const lower = keyword.toLowerCase();
         this.displayList = this.staffList.filter(s => 
-            // ✅ 使用標準欄位
+            // ✅ 純淨版: 只搜新欄位
             (s.staffName && s.staffName.toLowerCase().includes(lower)) || 
             (s.staffCode && s.staffCode.toLowerCase().includes(lower))
         );
@@ -135,12 +135,13 @@ export class StaffListPage {
         tbody.innerHTML = StaffListTemplate.renderRows(this.displayList, isRealAdmin);
     }
     
+    // ✅ 編輯 Modal 填值
     openEditModal(uid) {
         const user = this.staffList.find(u => u.uid === uid);
         if(!user) return;
         
         document.getElementById('edit-uid').value = uid;
-        // ✅ 填入標準欄位
+        // ✅ 直接讀新欄位
         document.getElementById('edit-staffName').value = user.staffName || '';
         document.getElementById('edit-staffCode').value = user.staffCode || '';
         document.getElementById('edit-email').value = user.email || '';
@@ -159,16 +160,19 @@ export class StaffListPage {
         this.editModal.show();
     }
 
+    // ✅ 儲存編輯
     async saveEdit() {
         const uid = document.getElementById('edit-uid').value;
         const btn = document.getElementById('btn-save');
         
         const data = {
-            // ✅ 寫入標準欄位
             staffName: document.getElementById('edit-staffName').value,
+            // staffCode: document.getElementById('edit-staffCode').value, // 唯讀
+            
             title: document.getElementById('edit-title').value,
             level: document.getElementById('edit-level').value,
-            role: document.getElementById('edit-is-manager').checked ? 'unit_manager' : (document.getElementById('edit-is-scheduler').checked ? 'unit_scheduler' : 'user'),
+            role: document.getElementById('edit-is-manager').checked ? 'unit_manager' : 
+                  (document.getElementById('edit-is-scheduler').checked ? 'unit_scheduler' : 'user'),
             constraints: {
                 isPregnant: document.getElementById('edit-isPregnant').checked,
                 isPostpartum: document.getElementById('edit-isPostpartum').checked,
@@ -183,16 +187,24 @@ export class StaffListPage {
             await userService.updateUser(uid, data);
             alert("✅ 修改成功");
             this.editModal.hide();
-            this.loadData(document.getElementById('unit-filter').value);
-        } catch(e) { alert("錯誤: " + e.message); } 
-        finally { btn.disabled = false; }
+            // 重新載入
+            const unitSelect = document.getElementById('unit-filter');
+            if(unitSelect) this.loadData(unitSelect.value);
+        } catch(e) {
+            alert("錯誤: " + e.message);
+        } finally {
+            btn.disabled = false;
+        }
     }
     
     async deleteStaff(uid) {
-        if(confirm("確定刪除？")) {
-            await userService.deleteStaff(uid);
-            alert("已刪除");
-            this.loadData(document.getElementById('unit-filter').value);
+        if(confirm("確定刪除此人員？")) {
+            try {
+                await userService.deleteStaff(uid);
+                alert("已刪除");
+                const currentUnitId = document.getElementById('unit-filter').value;
+                this.loadData(currentUnitId);
+            } catch(e) { alert("刪除失敗"); }
         }
     }
 }
