@@ -6,15 +6,17 @@ import {
 import { createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 export const userService = {
-    // 取得所有使用者 (全院)
+    // 取得所有使用者
     async getAllUsers() {
         try {
             const q = query(collection(db, "users"));
             const snapshot = await getDocs(q);
+            // ✅ 標準化: uid
             return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
         } catch (error) { console.error("Get All Users Error:", error); throw error; }
     },
 
+    // 根據單位取得使用者
     async getUsersByUnit(unitId) {
         try {
             const q = query(collection(db, "users"), where("unitId", "==", unitId));
@@ -23,6 +25,7 @@ export const userService = {
         } catch (error) { console.error("Get Users By Unit Error:", error); throw error; }
     },
 
+    // 取得單一使用者
     async getUserData(uid) {
         try {
             if (!db) throw new Error("Firestore DB 未初始化");
@@ -38,24 +41,21 @@ export const userService = {
             await updateDoc(doc(db, "users", uid), { lastLoginAt: serverTimestamp() });
         } catch (e) {}
     },
-    
-    // 建立新人員 (核心修改)
+
+    // 建立新員工 (使用標準欄位)
     async createStaff(data, password) {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, data.email, password);
             const uid = userCredential.user.uid;
             
-            // ✅ 使用新標準欄位: staffName, staffCode
-            // 這裡 data 應該已經包含新欄位，但為了保險我們做個映射或檢查
-            const payload = {
-                ...data,
-                // 確保寫入 unitId (若無則空字串)
+            // ✅ 寫入標準欄位: staffName, staffCode
+            await setDoc(doc(db, "users", uid), { 
+                ...data, 
+                // 確保 unitId 存在
                 unitId: data.unitId || "", 
                 createdAt: serverTimestamp(), 
                 updatedAt: serverTimestamp() 
-            };
-
-            await setDoc(doc(db, "users", uid), payload);
+            });
             return { success: true, uid: uid };
         } catch (error) { return { success: false, error: error.message }; }
     },
@@ -77,16 +77,15 @@ export const userService = {
     async getUnitStaff(unitId) { return this.getUsersByUnit(unitId); },
     async getAllStaffCount() { const list = await this.getAllUsers(); return list.length; },
     
-    // ✅ 關鍵修復：搜尋功能 (配合新欄位)
+    // ✅ 標準化搜尋 (移除 name, staffId 舊欄位判斷)
     async searchUsers(keyword) {
         const list = await this.getAllUsers();
         if (!keyword) return [];
         const k = keyword.toLowerCase();
         
         return list.filter(u => 
-            // 優先搜尋新欄位，但也相容舊資料 (u.name) 以防萬一
-            ((u.staffName && u.staffName.toLowerCase().includes(k)) || (u.name && u.name.toLowerCase().includes(k))) || 
-            ((u.staffCode && String(u.staffCode).toLowerCase().includes(k)) || (u.staffId && String(u.staffId).toLowerCase().includes(k)))
+            (u.staffName && u.staffName.toLowerCase().includes(k)) || 
+            (u.staffCode && String(u.staffCode).toLowerCase().includes(k))
         );
     }
 };
