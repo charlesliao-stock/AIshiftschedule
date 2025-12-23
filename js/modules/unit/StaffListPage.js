@@ -7,10 +7,10 @@ export class StaffListPage {
     constructor() {
         this.staffList = [];
         this.displayList = [];
-        this.unitMap = {};
         this.currentUser = null;
         this.editModal = null;
-        this.sortConfig = { key: 'staffId', direction: 'asc' };
+        // ✅ 排序鍵值標準化
+        this.sortConfig = { key: 'staffCode', direction: 'asc' };
     }
 
     async render() {
@@ -23,7 +23,6 @@ export class StaffListPage {
 
         try {
             let units = [];
-            // 權限判斷：模擬中 或 系統管理員
             if (this.currentUser.isImpersonating) {
                 if (this.currentUser.unitId) {
                     const u = await UnitService.getUnitById(this.currentUser.unitId);
@@ -42,13 +41,13 @@ export class StaffListPage {
                 }
             }
 
-            units.forEach(u => this.unitMap[u.unitId] = u.unitName);
-
+            // ✅ 移除正規化 map (Service 已處理)
             if (units.length === 0) {
                 unitOptionsHtml = '<option value="">無權限</option>';
             } else {
+                // ✅ 直接讀取 unitId
                 unitOptionsHtml = units.map(u => 
-                    `<option value="${u.unitId}">${u.unitName} (${u.unitCode})</option>`
+                    `<option value="${u.unitId}">${u.unitName} (${u.unitCode || '-'})</option>`
                 ).join('');
             }
 
@@ -56,108 +55,75 @@ export class StaffListPage {
             return StaffListTemplate.renderLayout(unitOptionsHtml, isRealAdmin, isSelectDisabled);
 
         } catch (e) {
-            console.error(e);
             return `<div class="alert alert-danger m-3">載入失敗: ${e.message}</div>`;
         }
     }
 
     async afterRender() {
-        // 安全檢查：Modal 是否存在
         const modalElement = document.getElementById('edit-staff-modal');
         if (!modalElement) return;
-
         this.editModal = new bootstrap.Modal(modalElement);
         window.routerPage = this;
 
         const unitSelect = document.getElementById('unit-filter');
-        
-        // 🔴 關鍵修正：決定要載入哪個 Unit ID
         let targetUnitId = null;
 
         if (this.currentUser.isImpersonating) {
-            // 模擬模式：直接使用當前身分的 UnitId
             targetUnitId = this.currentUser.unitId;
         } else if (unitSelect && unitSelect.options.length > 0) {
-            // 一般模式：使用選單的第一個選項
-            targetUnitId = unitSelect.options[0].value;
+             targetUnitId = unitSelect.value || unitSelect.options[0].value;
         }
 
-        // 同步 UI 狀態
         if (unitSelect && targetUnitId) {
             unitSelect.value = targetUnitId;
         }
 
-        // 綁定事件
         unitSelect?.addEventListener('change', (e) => this.loadData(e.target.value));
         
-        document.getElementById('btn-add-staff')?.addEventListener('click', () => {
-            window.location.hash = '/unit/staff/create';
-        });
-
-        document.getElementById('keyword-search')?.addEventListener('input', (e) => {
-            this.filterData(e.target.value);
-        });
-
+        document.getElementById('btn-add-staff')?.addEventListener('click', () => { window.location.hash = '/unit/staff/create'; });
+        document.getElementById('keyword-search')?.addEventListener('input', (e) => { this.filterData(e.target.value); });
         document.getElementById('btn-save')?.addEventListener('click', () => this.saveEdit());
+        document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
 
-        document.querySelectorAll('th[data-sort]').forEach(th => {
-            th.addEventListener('click', () => this.handleSort(th.dataset.sort));
-        });
-
-        // 🚀 強制觸發載入 (不依賴 UI 事件)
-        if (targetUnitId) {
-            console.log("🚀 StaffListPage 強制載入:", targetUnitId);
-            await this.loadData(targetUnitId);
-        }
+        if (targetUnitId) await this.loadData(targetUnitId);
+        else document.getElementById('staff-tbody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">請選擇單位以檢視人員</td></tr>';
     }
 
-    // 🔴 修改：接受 unitId 參數
     async loadData(unitId) {
-        if(!unitId) return;
-
+        if(!unitId || unitId === 'undefined') return;
         const tbody = document.getElementById('staff-tbody');
-        if(tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
         try {
             this.staffList = await userService.getUsersByUnit(unitId);
             this.applySort(); 
-        } catch (e) {
-            console.error(e);
-            if(tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">載入失敗: ${e.message}</td></tr>`;
-        }
+        } catch (e) { console.error(e); }
     }
 
     handleSort(key) {
-        if (this.sortConfig.key === key) {
-            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
-        } else {
-            this.sortConfig.key = key;
-            this.sortConfig.direction = 'asc';
-        }
+        this.sortConfig.key = key; 
+        this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc'; 
         this.applySort();
     }
 
     applySort() {
-        const { key, direction } = this.sortConfig;
+        if (!this.staffList) this.staffList = [];
         this.displayList = [...this.staffList].sort((a, b) => {
-            let valA = a[key] || '';
-            let valB = b[key] || '';
-            if (valA < valB) return direction === 'asc' ? -1 : 1;
-            if (valA > valB) return direction === 'asc' ? 1 : -1;
-            return 0;
+            // ✅ 使用標準欄位
+            let valA = a[this.sortConfig.key] || '';
+            let valB = b[this.sortConfig.key] || '';
+            return this.sortConfig.direction === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
         });
         this.renderTable();
     }
 
     filterData(keyword) {
-        if (!keyword) {
-            this.applySort();
-            return;
-        }
+        if (!keyword) { this.applySort(); return; }
         const lower = keyword.toLowerCase();
         this.displayList = this.staffList.filter(s => 
-            (s.name && s.name.toLowerCase().includes(lower)) ||
-            (s.staffId && s.staffId.toLowerCase().includes(lower))
+            // ✅ 使用標準欄位
+            (s.staffName && s.staffName.toLowerCase().includes(lower)) || 
+            (s.staffCode && s.staffCode.toLowerCase().includes(lower))
         );
         this.renderTable();
     }
@@ -174,21 +140,21 @@ export class StaffListPage {
         if(!user) return;
         
         document.getElementById('edit-uid').value = uid;
-        document.getElementById('edit-staffId').value = user.staffId || '';
-        document.getElementById('edit-name').value = user.name || '';
+        // ✅ 填入標準欄位
+        document.getElementById('edit-staffName').value = user.staffName || '';
+        document.getElementById('edit-staffCode').value = user.staffCode || '';
         document.getElementById('edit-email').value = user.email || '';
-        document.getElementById('edit-title').value = user.title || 'N0';
+        document.getElementById('edit-title').value = user.title || 'N';
         document.getElementById('edit-level').value = user.level || 'N0';
-        
         document.getElementById('edit-is-manager').checked = (user.role === 'unit_manager');
         document.getElementById('edit-is-scheduler').checked = (user.role === 'unit_scheduler');
 
-        const cons = user.constraints || {};
-        document.getElementById('edit-isPregnant').checked = !!cons.isPregnant;
-        document.getElementById('edit-isPostpartum').checked = !!cons.isPostpartum;
-        document.getElementById('edit-canBatch').checked = !!cons.canBatch;
-        document.getElementById('edit-maxConsecutive').value = cons.maxConsecutive || 6;
-        document.getElementById('edit-maxConsecutiveNights').value = cons.maxConsecutiveNights || 4;
+        const c = user.constraints || {};
+        document.getElementById('edit-isPregnant').checked = !!c.isPregnant;
+        document.getElementById('edit-isPostpartum').checked = !!c.isPostpartum;
+        document.getElementById('edit-canBatch').checked = !!c.canBatch;
+        document.getElementById('edit-maxConsecutive').value = c.maxConsecutive || 6;
+        document.getElementById('edit-maxConsecutiveNights').value = c.maxConsecutiveNights || 4;
 
         this.editModal.show();
     }
@@ -198,12 +164,11 @@ export class StaffListPage {
         const btn = document.getElementById('btn-save');
         
         const data = {
-            name: document.getElementById('edit-name').value,
-            staffId: document.getElementById('edit-staffId').value,
+            // ✅ 寫入標準欄位
+            staffName: document.getElementById('edit-staffName').value,
             title: document.getElementById('edit-title').value,
             level: document.getElementById('edit-level').value,
-            role: document.getElementById('edit-is-manager').checked ? 'unit_manager' : 
-                  (document.getElementById('edit-is-scheduler').checked ? 'unit_scheduler' : 'user'),
+            role: document.getElementById('edit-is-manager').checked ? 'unit_manager' : (document.getElementById('edit-is-scheduler').checked ? 'unit_scheduler' : 'user'),
             constraints: {
                 isPregnant: document.getElementById('edit-isPregnant').checked,
                 isPostpartum: document.getElementById('edit-isPostpartum').checked,
@@ -215,34 +180,19 @@ export class StaffListPage {
 
         btn.disabled = true;
         try {
-            if(uid) {
-                await userService.updateUser(uid, data);
-                alert("✅ 修改成功");
-            } else {
-                const email = document.getElementById('edit-email').value;
-                const res = await userService.createStaff({ ...data, email }, "123456");
-                if(res.success) alert("✅ 新增成功");
-                else alert("新增失敗: " + res.error);
-            }
+            await userService.updateUser(uid, data);
+            alert("✅ 修改成功");
             this.editModal.hide();
-            // 重新載入 (需傳入當前選取的 unitId)
-            const currentUnitId = document.getElementById('unit-filter').value;
-            this.loadData(currentUnitId);
-        } catch(e) {
-            alert("錯誤: " + e.message);
-        } finally {
-            btn.disabled = false;
-        }
+            this.loadData(document.getElementById('unit-filter').value);
+        } catch(e) { alert("錯誤: " + e.message); } 
+        finally { btn.disabled = false; }
     }
     
     async deleteStaff(uid) {
-        if(confirm("確定刪除此人員？")) {
-            try {
-                await userService.deleteStaff(uid);
-                alert("已刪除");
-                const currentUnitId = document.getElementById('unit-filter').value;
-                this.loadData(currentUnitId);
-            } catch(e) { alert("刪除失敗"); }
+        if(confirm("確定刪除？")) {
+            await userService.deleteStaff(uid);
+            alert("已刪除");
+            this.loadData(document.getElementById('unit-filter').value);
         }
     }
 }
