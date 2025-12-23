@@ -2,6 +2,9 @@ import { userService } from "../../services/firebase/UserService.js";
 import { UnitService } from "../../services/firebase/UnitService.js";
 import { authService } from "../../services/firebase/AuthService.js";
 import { StaffListTemplate } from "./templates/StaffListTemplate.js";
+// 引入 Firestore 方法以執行內建修復工具
+import { collection, getDocs, writeBatch, doc, deleteField } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { firebaseService } from "../../services/firebase/FirebaseService.js";
 
 export class StaffListPage {
     constructor() {
@@ -9,6 +12,7 @@ export class StaffListPage {
         this.displayList = [];
         this.currentUser = null;
         this.editModal = null;
+        // ✅ [標準化] 預設排序使用標準欄位
         this.sortConfig = { key: 'staffCode', direction: 'asc' };
     }
 
@@ -44,12 +48,22 @@ export class StaffListPage {
                 unitOptionsHtml = '<option value="">無權限</option>';
             } else {
                 unitOptionsHtml = units.map(u => 
-                    `<option value="${u.unitId}">${u.unitName} (${u.unitCode})</option>`
+                    `<option value="${u.unitId}">${u.unitName} (${u.unitCode || '-'})</option>`
                 ).join('');
             }
 
             const isRealAdmin = (this.currentUser.role === 'system_admin' && !this.currentUser.isImpersonating);
-            return StaffListTemplate.renderLayout(unitOptionsHtml, isRealAdmin, isSelectDisabled);
+            
+            // 取得標準介面
+            let html = StaffListTemplate.renderLayout(unitOptionsHtml, isRealAdmin, isSelectDisabled);
+            
+            // ✅ [工具] 插入「資料修復按鈕」 (僅在開發/維護期使用，確保資料庫欄位正確)
+            if (isRealAdmin) {
+                const migrationBtn = `<button id="btn-migration" class="btn btn-warning text-dark fw-bold ms-2"><i class="fas fa-wrench"></i> 修復資料庫欄位</button>`;
+                html = html.replace('新增人員\n                        </button>', '新增人員</button>' + migrationBtn);
+            }
+            
+            return html;
 
         } catch (e) {
             console.error(e);
@@ -58,21 +72,12 @@ export class StaffListPage {
     }
 
     async afterRender() {
-        // ✅ [關鍵修正] 優先綁定 Router，防止按鈕點擊無反應
+        // ✅ 優先綁定，防止報錯導致按鈕失效
         window.routerPage = this;
 
-        // 安全初始化 Modal
         const modalElement = document.getElementById('edit-staff-modal');
         if (modalElement) {
-            try {
-                this.editModal = new bootstrap.Modal(modalElement);
-            } catch (e) {
-                console.warn("Modal 初始化異常，嘗試使用現有實例:", e);
-                // 嘗試獲取既有實例
-                const existingModal = bootstrap.Modal.getInstance(modalElement);
-                if (existingModal) this.editModal = existingModal;
-                else this.editModal = new bootstrap.Modal(modalElement);
-            }
+            this.editModal = new bootstrap.Modal(modalElement);
         }
 
         const unitSelect = document.getElementById('unit-filter');
@@ -92,10 +97,11 @@ export class StaffListPage {
         
         document.getElementById('btn-add-staff')?.addEventListener('click', () => { window.location.hash = '/unit/staff/create'; });
         document.getElementById('keyword-search')?.addEventListener('input', (e) => { this.filterData(e.target.value); });
-        
-        // 綁定儲存按鈕
         document.getElementById('btn-save')?.addEventListener('click', () => this.saveEdit());
         
+        // 綁定修復按鈕
+        document.getElementById('btn-migration')?.addEventListener('click', () => this.runMigration());
+
         document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
 
         if (targetUnitId) await this.loadData(targetUnitId);
@@ -121,19 +127,9 @@ export class StaffListPage {
     applySort() {
         if (!this.staffList) this.staffList = [];
         this.displayList = [...this.staffList].sort((a, b) => {
-            // ✅ [修正] 排序相容性：支援 staffName/staffCode 也能讀舊資料
+            // ✅ [潔癖化] 只讀取標準欄位，不相容舊欄位
             let valA = a[this.sortConfig.key] || '';
             let valB = b[this.sortConfig.key] || '';
-            
-            if(this.sortConfig.key === 'staffName') {
-                valA = a.staffName || a.name || '';
-                valB = b.staffName || b.name || '';
-            }
-            if(this.sortConfig.key === 'staffCode') {
-                valA = a.staffCode || a.staffId || '';
-                valB = b.staffCode || b.staffId || '';
-            }
-
             return this.sortConfig.direction === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
         });
         this.renderTable();
@@ -143,11 +139,9 @@ export class StaffListPage {
         if (!keyword) { this.applySort(); return; }
         const k = keyword.toLowerCase();
         this.displayList = this.staffList.filter(s => 
-            // ✅ [修正] 搜尋相容性
+            // ✅ [潔癖化] 只搜尋標準欄位
             (s.staffName && s.staffName.toLowerCase().includes(k)) || 
-            (s.name && s.name.toLowerCase().includes(k)) ||
-            (s.staffCode && s.staffCode.toLowerCase().includes(k)) ||
-            (s.staffId && s.staffId.toLowerCase().includes(k))
+            (s.staffCode && String(s.staffCode).toLowerCase().includes(k))
         );
         this.renderTable();
     }
@@ -159,21 +153,18 @@ export class StaffListPage {
         tbody.innerHTML = StaffListTemplate.renderRows(this.displayList, isRealAdmin);
     }
     
-    // ✅ 編輯 Modal 填值 (相容性讀取)
     openEditModal(uid) {
         const user = this.staffList.find(u => u.uid === uid);
         if(!user) return;
         
         document.getElementById('edit-uid').value = uid;
-        
-        // 優先讀取新欄位，若無則讀舊欄位
-        document.getElementById('edit-staffName').value = user.staffName || user.name || '';
-        document.getElementById('edit-staffCode').value = user.staffCode || user.staffId || '';
+        // ✅ [潔癖化] 只讀取標準欄位，舊資料會變空白，強迫更新
+        document.getElementById('edit-staffName').value = user.staffName || '';
+        document.getElementById('edit-staffCode').value = user.staffCode || '';
         
         document.getElementById('edit-email').value = user.email || '';
         document.getElementById('edit-title').value = user.title || 'N';
         document.getElementById('edit-level').value = user.level || 'N0';
-        
         document.getElementById('edit-is-manager').checked = (user.role === 'unit_manager');
         document.getElementById('edit-is-scheduler').checked = (user.role === 'unit_scheduler');
 
@@ -187,13 +178,12 @@ export class StaffListPage {
         this.editModal.show();
     }
 
-    // ✅ 儲存編輯 (寫入新欄位)
     async saveEdit() {
         const uid = document.getElementById('edit-uid').value;
         const btn = document.getElementById('btn-save');
         
         const data = {
-            // 寫入 staffName / staffCode
+            // ✅ [標準化] 寫入標準欄位
             staffName: document.getElementById('edit-staffName').value,
             staffCode: document.getElementById('edit-staffCode').value,
             
@@ -215,8 +205,6 @@ export class StaffListPage {
             await userService.updateUser(uid, data);
             alert("✅ 修改成功");
             this.editModal.hide();
-            
-            // 重新載入
             const unitSelect = document.getElementById('unit-filter');
             if(unitSelect) this.loadData(unitSelect.value);
         } catch(e) {
@@ -227,11 +215,69 @@ export class StaffListPage {
     }
     
     async deleteStaff(uid) {
-        if(confirm("確定刪除？")) {
-            await userService.deleteStaff(uid);
-            alert("已刪除");
-            const currentUnitId = document.getElementById('unit-filter').value;
-            this.loadData(currentUnitId);
+        if(confirm("確定刪除此人員？")) {
+            try {
+                await userService.deleteStaff(uid);
+                alert("已刪除");
+                const currentUnitId = document.getElementById('unit-filter').value;
+                this.loadData(currentUnitId);
+            } catch(e) { alert("刪除失敗"); }
+        }
+    }
+
+    // ✅ 內建資料庫修復工具 (按鈕觸發)
+    async runMigration() {
+        if(!confirm("確定要執行資料庫欄位升級嗎？\n這將把 name/staffId 轉換為 staffName/staffCode，並刪除舊欄位。")) return;
+        
+        const btn = document.getElementById('btn-migration');
+        btn.disabled = true;
+        btn.innerHTML = "⏳ 處理中...";
+
+        try {
+            const db = firebaseService.getDb();
+            const usersRef = collection(db, "users");
+            const snapshot = await getDocs(usersRef);
+            const batch = writeBatch(db);
+            let count = 0;
+
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                const ref = doc(db, "users", docSnap.id);
+                const updates = {};
+                let needsUpdate = false;
+
+                // 遷移 name -> staffName
+                if (data.name !== undefined) {
+                    if (!data.staffName) updates.staffName = data.name;
+                    updates.name = deleteField(); // 刪除舊欄位
+                    needsUpdate = true;
+                }
+                // 遷移 staffId -> staffCode
+                if (data.staffId !== undefined) {
+                    if (!data.staffCode) updates.staffCode = data.staffId;
+                    updates.staffId = deleteField(); // 刪除舊欄位
+                    needsUpdate = true;
+                }
+                
+                if (needsUpdate) {
+                    batch.update(ref, updates);
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                await batch.commit();
+                alert(`🎉 成功修復 ${count} 筆資料！頁面將重新整理。`);
+                window.location.reload();
+            } else {
+                alert("✨ 資料庫已經是最新狀態，無需修復。");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("❌ 修復失敗: " + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-wrench"></i> 修復資料庫欄位';
         }
     }
 }
