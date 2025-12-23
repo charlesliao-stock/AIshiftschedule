@@ -43,7 +43,6 @@ export class StaffListPage {
             if (units.length === 0) {
                 unitOptionsHtml = '<option value="">無權限</option>';
             } else {
-                // ✅ 純淨版: 直接讀 unitId
                 unitOptionsHtml = units.map(u => 
                     `<option value="${u.unitId}">${u.unitName} (${u.unitCode || '-'})</option>`
                 ).join('');
@@ -81,7 +80,7 @@ export class StaffListPage {
         document.getElementById('btn-add-staff')?.addEventListener('click', () => { window.location.hash = '/unit/staff/create'; });
         document.getElementById('keyword-search')?.addEventListener('input', (e) => { this.filterData(e.target.value); });
         
-        // 綁定儲存按鈕
+        // 綁定儲存
         document.getElementById('btn-save')?.addEventListener('click', () => this.saveEdit());
         
         document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
@@ -121,7 +120,6 @@ export class StaffListPage {
         if (!keyword) { this.applySort(); return; }
         const lower = keyword.toLowerCase();
         this.displayList = this.staffList.filter(s => 
-            // ✅ 純淨版: 只搜新欄位
             (s.staffName && s.staffName.toLowerCase().includes(lower)) || 
             (s.staffCode && s.staffCode.toLowerCase().includes(lower))
         );
@@ -135,13 +133,14 @@ export class StaffListPage {
         tbody.innerHTML = StaffListTemplate.renderRows(this.displayList, isRealAdmin);
     }
     
-    // ✅ 編輯 Modal 填值
+    // ✅ 修正：讀取正確的 DOM ID
     openEditModal(uid) {
         const user = this.staffList.find(u => u.uid === uid);
         if(!user) return;
         
         document.getElementById('edit-uid').value = uid;
-        // ✅ 直接讀新欄位
+        
+        // 這裡對應 Template 中的 ID: edit-staffName, edit-staffCode
         document.getElementById('edit-staffName').value = user.staffName || '';
         document.getElementById('edit-staffCode').value = user.staffCode || '';
         document.getElementById('edit-email').value = user.email || '';
@@ -160,14 +159,17 @@ export class StaffListPage {
         this.editModal.show();
     }
 
-    // ✅ 儲存編輯
+    // ✅ 修正：寫入正確的資料欄位
     async saveEdit() {
         const uid = document.getElementById('edit-uid').value;
         const btn = document.getElementById('btn-save');
         
         const data = {
+            // 讀取 Template 中的 edit-staffName
             staffName: document.getElementById('edit-staffName').value,
-            // staffCode: document.getElementById('edit-staffCode').value, // 唯讀
+            
+            // staffCode (通常唯讀，若要允許修改，需確保 Template 中的 input 沒有 readonly)
+            // staffCode: document.getElementById('edit-staffCode').value,
             
             title: document.getElementById('edit-title').value,
             level: document.getElementById('edit-level').value,
