@@ -7,6 +7,7 @@ export class PreScheduleManagePage {
     constructor() {
         this.targetUnitId = null;
         this.unitSelect = null;
+        this.createModal = null;
     }
 
     async render() {
@@ -15,8 +16,13 @@ export class PreScheduleManagePage {
     }
 
     async afterRender() {
+        window.routerPage = this; // 綁定給 HTML onclick 使用
         this.unitSelect = document.getElementById('unit-selector');
-        // 若 Template 中 ID 不同，請自行調整 (這裡假設是 unit-selector)
+        
+        // 初始化 Modal
+        const modalEl = document.getElementById('create-pre-modal');
+        if(modalEl) this.createModal = new bootstrap.Modal(modalEl);
+
         if(!this.unitSelect) return; 
 
         let retries = 0;
@@ -31,7 +37,7 @@ export class PreScheduleManagePage {
                 const u = await UnitService.getUnitById(user.unitId);
                 if(u) units = [u];
             }
-            this.unitSelect.disabled = true; // 鎖定
+            this.unitSelect.disabled = true;
         }
         else if (user.role === 'system_admin') {
             units = await UnitService.getAllUnits();
@@ -52,12 +58,9 @@ export class PreScheduleManagePage {
         }
 
         this.unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
-        
-        // 顯示選單容器
-        const container = document.getElementById('unit-selector-container');
-        if(container) container.style.display = 'block';
+        document.getElementById('unit-selector-container').style.display = 'block';
 
-        // 🔴 關鍵修正：明確設定目標 ID 並同步
+        // 明確設定目標 ID 並同步
         if (user.isImpersonating) {
             this.targetUnitId = user.unitId;
         } else {
@@ -73,46 +76,54 @@ export class PreScheduleManagePage {
             this.loadList(this.targetUnitId);
         });
 
-        // 🚀 強制觸發載入
+        // 強制觸發載入
         console.log("🚀 PreScheduleManagePage 強制載入:", this.targetUnitId);
         await this.loadList(this.targetUnitId);
     }
     
+    // 供 HTML onchange 呼叫
+    handleUnitChange(val) {
+        this.targetUnitId = val;
+        this.loadList(val);
+    }
+
     async loadList(unitId) {
         if(!unitId) return;
-        
-        // 載入該單位的預班列表
-        try {
-            // 這裡呼叫 Service 取得資料
-            const list = await PreScheduleService.getPreSchedulesList(unitId);
-            console.log("✅ 預班資料讀取成功:", list);
-            
-            // 假設 Template 裡有列表容器 id="pre-schedule-list-tbody"
-            // 如果您的 Template 使用了不同的渲染方法，請在這裡呼叫
-            // 例如：PreScheduleManageTemplate.renderList(list) 
-            
-            // 這裡提供一個基本的渲染範例，確保您能看到資料
-            const tbody = document.querySelector('tbody'); 
-            if(tbody) {
-                if(list.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">尚無預班資料，請點擊「開啟新預班」</td></tr>';
-                } else {
-                    tbody.innerHTML = list.map(item => `
-                        <tr>
-                            <td class="fw-bold">${item.year}-${String(item.month).padStart(2,'0')}</td>
-                            <td>${item.status === 'open' ? '<span class="badge bg-success">進行中</span>' : '<span class="badge bg-secondary">已截止</span>'}</td>
-                            <td>${item.staffIds ? item.staffIds.length : 0} 人</td>
-                            <td>${item.submissions ? Object.keys(item.submissions).length : 0} 人</td>
-                            <td>
-                                <button class="btn btn-sm btn-primary" onclick="window.location.hash='/pre-schedule/edit?id=${item.id}'">管理</button>
-                            </td>
-                        </tr>
-                    `).join('');
-                }
-            }
+        const tbody = document.getElementById('pre-schedule-list-tbody');
+        if(tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
+        try {
+            const list = await PreScheduleService.getPreSchedulesList(unitId);
+            console.log("✅ 預班資料:", list);
+            
+            // 🔴 關鍵修正：呼叫 Template.renderList
+            if (tbody) {
+                tbody.innerHTML = PreScheduleManageTemplate.renderList(list);
+            }
         } catch(e) {
             console.error("Load list error:", e);
+            if(tbody) tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">載入失敗: ${e.message}</td></tr>`;
         }
+    }
+
+    // 開啟 Modal
+    openCreateModal() {
+        if(this.createModal) this.createModal.show();
+    }
+
+    // 建立新預班
+    async createPreSchedule() {
+        const val = document.getElementById('new-pre-month').value; // YYYY-MM
+        const closeDate = document.getElementById('new-pre-close').value;
+        
+        if(!val || !closeDate) { alert('請填寫完整'); return; }
+        
+        const [y, m] = val.split('-');
+        
+        // 這裡需要根據您的 PreScheduleService.createPreSchedule 實作來傳遞參數
+        // 這裡做一個簡單示範
+        alert(`功能開發中：開啟 ${y}年${m}月 預班，截止日 ${closeDate}`);
+        // await PreScheduleService.createPreSchedule(...)
+        if(this.createModal) this.createModal.hide();
     }
 }
