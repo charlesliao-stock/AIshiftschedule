@@ -1,5 +1,4 @@
 export const StaffListTemplate = {
-    // 1. 主畫面佈局
     renderLayout(unitOptionsHtml, isAdmin, isOneUnit) {
         return `
             <div class="container-fluid mt-4">
@@ -30,8 +29,8 @@ export const StaffListTemplate = {
                             <table class="table table-hover align-middle mb-0">
                                 <thead class="table-light">
                                     <tr>
-                                        <th data-sort="staffId" style="cursor:pointer">編號 <i class="fas fa-sort text-muted small"></i></th>
-                                        <th data-sort="name" style="cursor:pointer">姓名 <i class="fas fa-sort text-muted small"></i></th>
+                                        <th data-sort="staffCode" style="cursor:pointer">編號 <i class="fas fa-sort text-muted small"></i></th>
+                                        <th data-sort="staffName" style="cursor:pointer">姓名 <i class="fas fa-sort text-muted small"></i></th>
                                         <th data-sort="title" style="cursor:pointer">職稱 <i class="fas fa-sort text-muted small"></i></th>
                                         <th data-sort="level" style="cursor:pointer">職級 <i class="fas fa-sort text-muted small"></i></th>
                                         <th>系統權限</th>
@@ -59,11 +58,11 @@ export const StaffListTemplate = {
                                 <div class="row g-3 mb-3">
                                     <div class="col-6">
                                         <label class="form-label fw-bold">姓名</label>
-                                        <input type="text" id="edit-name" class="form-control">
+                                        <input type="text" id="edit-staffName" class="form-control">
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label fw-bold">編號</label>
-                                        <input type="text" id="edit-staffId" class="form-control bg-light" readonly>
+                                        <input type="text" id="edit-staffCode" class="form-control bg-light" readonly>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label">Email (登入帳號)</label>
@@ -75,6 +74,7 @@ export const StaffListTemplate = {
                                             <option value="NP">專科護理師 (NP)</option>
                                             <option value="HN">護理長 (HN)</option>
                                             <option value="N">護理師 (N)</option>
+                                            <option value="AH">副護理長 (AH)</option>
                                         </select>
                                     </div>
                                     <div class="col-6">
@@ -113,7 +113,6 @@ export const StaffListTemplate = {
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="form-text small text-danger">※ 懷孕或產後哺乳者，系統將強制不排 22:00 後的班別。</div>
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label fw-bold text-primary">系統權限</label>
@@ -140,14 +139,13 @@ export const StaffListTemplate = {
         `;
     },
 
-    // 2. 渲染列表列 (補上缺少的邏輯)
     renderRows(staffList, isRealAdmin) {
         if (!staffList || staffList.length === 0) return '<tr><td colspan="7" class="text-center text-muted p-4">無人員資料</td></tr>';
         
         return staffList.map(u => `
             <tr>
-                <td>${u.staffId || '-'}</td>
-                <td class="fw-bold">${u.name}</td>
+                <td>${u.staffCode}</td>
+                <td class="fw-bold">${u.staffName}</td>
                 <td>${u.title || '-'}</td>
                 <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
                 <td>${this.renderRoles(u)}</td>
@@ -160,7 +158,6 @@ export const StaffListTemplate = {
         `).join('');
     },
 
-    // 3. 輔助渲染：權限
     renderRoles(u) {
         let roles = [];
         if (u.role === 'unit_manager') roles.push('<span class="badge bg-danger">主管</span>');
@@ -170,7 +167,6 @@ export const StaffListTemplate = {
         return roles.join(' ');
     },
 
-    // 4. 輔助渲染：限制
     renderConstraints(u) {
         let tags = [];
         const c = u.constraints || {};
