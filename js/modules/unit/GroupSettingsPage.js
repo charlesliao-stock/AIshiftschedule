@@ -24,13 +24,12 @@ export class GroupSettingsPage {
         
         let units = [];
         
-        // 🔴 修正：加入模擬狀態鎖定
         if (user.isImpersonating) {
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
                 if(u) units = [u];
             }
-            unitSelect.disabled = true; // 鎖定!
+            unitSelect.disabled = true;
         }
         else if (user.role === 'system_admin') {
             units = await UnitService.getAllUnits();
@@ -49,7 +48,6 @@ export class GroupSettingsPage {
         } else {
             unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
             
-            // 預設選取
             if (user.isImpersonating) {
                 this.targetUnitId = user.unitId;
             } else {
@@ -78,7 +76,9 @@ export class GroupSettingsPage {
             const unit = await UnitService.getUnitById(unitId);
             this.groups = unit?.groups || [];
             this.staffList = await userService.getUsersByUnit(unitId);
-            this.staffList.sort((a,b) => (a.staffId || '').localeCompare(b.staffId || ''));
+            
+            // ✅ [修正] 使用新標準 staffCode 進行排序
+            this.staffList.sort((a,b) => (a.staffCode || '').localeCompare(b.staffCode || ''));
             
             document.getElementById('group-list').innerHTML = GroupSettingsTemplate.renderGroupList(this.groups);
             document.getElementById('staff-tbody').innerHTML = GroupSettingsTemplate.renderStaffRows(this.staffList, this.groups);
@@ -118,7 +118,6 @@ export class GroupSettingsPage {
         });
         if(updates.length > 0) {
             await Promise.all(updates);
-            // alert('已更新分組'); // 選擇性提示，避免干擾
         }
     }
 }
