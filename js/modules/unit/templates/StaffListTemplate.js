@@ -1,5 +1,5 @@
 export const StaffListTemplate = {
-    // 1. 主畫面佈局 (保留舊版樣式)
+    // 1. 主畫面佈局 (保持您要的舊版樣式)
     renderLayout(unitOptionsHtml, isAdmin, isOneUnit) {
         return `
             <div class="container-fluid mt-4">
@@ -114,7 +114,6 @@ export const StaffListTemplate = {
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="form-text small text-danger">※ 懷孕或產後哺乳者，系統將強制不排 22:00 後的班別。</div>
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label fw-bold text-primary">系統權限</label>
@@ -141,19 +140,13 @@ export const StaffListTemplate = {
         `;
     },
 
-    // 2. 渲染列表列 (修正 undefined 問題)
     renderRows(staffList, isRealAdmin) {
         if (!staffList || staffList.length === 0) return '<tr><td colspan="7" class="text-center text-muted p-4">無人員資料</td></tr>';
         
-        return staffList.map(u => {
-            // ✅ [關鍵修正] 同時支援新舊欄位，避免顯示 undefined
-            const displayName = u.staffName || u.name || '<span class="text-danger">未命名</span>';
-            const displayCode = u.staffCode || u.staffId || '-';
-
-            return `
+        return staffList.map(u => `
             <tr>
-                <td>${displayCode}</td>
-                <td class="fw-bold">${displayName}</td>
+                <td>${u.staffCode || '<span class="text-danger fw-bold">?</span>'}</td>
+                <td class="fw-bold">${u.staffName || '<span class="text-danger fw-bold">需資料庫修復</span>'}</td>
                 <td>${u.title || '-'}</td>
                 <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
                 <td>${this.renderRoles(u)}</td>
@@ -163,7 +156,7 @@ export const StaffListTemplate = {
                     ${isRealAdmin ? `<button class="btn btn-sm btn-outline-danger" onclick="window.routerPage.deleteStaff('${u.uid}')"><i class="fas fa-trash"></i></button>` : ''}
                 </td>
             </tr>
-        `}).join('');
+        `).join('');
     },
 
     renderRoles(u) {
