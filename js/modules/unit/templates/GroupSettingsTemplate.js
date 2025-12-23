@@ -69,9 +69,9 @@ export const GroupSettingsTemplate = {
         
         return staffList.map(u => `
             <tr>
-                <td class="text-muted small">${u.staffId || '-'}</td>
-                <td class="fw-bold">${u.name}</td>
-                <td><span class="badge bg-light text-dark border">${u.rank}</span></td>
+                <td class="text-muted small">${u.staffCode || '-'}</td>
+                <td class="fw-bold">${u.staffName || '(缺名)'}</td>
+                <td><span class="badge bg-light text-dark border">${u.level || 'N0'}</span></td>
                 <td>
                     <select class="form-select form-select-sm group-select" data-uid="${u.uid}" style="width:120px; margin:0 auto;">
                         ${opts.replace(`value="${u.group}"`, `value="${u.group}" selected`)}
