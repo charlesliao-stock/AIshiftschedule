@@ -24,7 +24,7 @@ export class GroupSettingsPage {
         
         let units = [];
         
-        // 🔴 加入鎖定邏輯
+        // 🔴 修正：加入模擬狀態鎖定
         if (user.isImpersonating) {
             if (user.unitId) {
                 const u = await UnitService.getUnitById(user.unitId);
@@ -32,7 +32,7 @@ export class GroupSettingsPage {
             }
             unitSelect.disabled = true; // 鎖定!
         }
-        else if (user.role === 'system_admin' || user.originalRole === 'system_admin') {
+        else if (user.role === 'system_admin') {
             units = await UnitService.getAllUnits();
             unitSelect.disabled = false;
         } else {
@@ -50,7 +50,7 @@ export class GroupSettingsPage {
             unitSelect.innerHTML = units.map(u => `<option value="${u.unitId}">${u.unitName}</option>`).join('');
             
             // 預設選取
-            if(user.isImpersonating) {
+            if (user.isImpersonating) {
                 this.targetUnitId = user.unitId;
             } else {
                 this.targetUnitId = units[0].unitId;
@@ -89,8 +89,36 @@ export class GroupSettingsPage {
         } catch (e) { console.error(e); }
     }
     
-    // ... 其餘方法保持不變 ...
-    async addGroup() { /* ... */ }
-    async deleteGroup(idx) { /* ... */ }
-    async saveAssignments() { /* ... */ }
+    async addGroup() {
+        const name = document.getElementById('new-group-name').value.trim();
+        if(!name) return;
+        this.groups.push(name);
+        await UnitService.updateUnit(this.targetUnitId, { groups: this.groups });
+        this.modal.hide(); 
+        this.loadData(this.targetUnitId); 
+    }
+
+    async deleteGroup(idx) { 
+        if(confirm('刪除組別？(該組別的人員將變為未分組)')) { 
+            this.groups.splice(idx, 1); 
+            await UnitService.updateUnit(this.targetUnitId, { groups: this.groups }); 
+            this.loadData(this.targetUnitId);
+        } 
+    }
+    
+    async saveAssignments() {
+        const updates = [];
+        document.querySelectorAll('.group-select').forEach(sel => {
+            const uid = sel.dataset.uid;
+            const val = sel.value;
+            const original = this.staffList.find(x => x.uid === uid);
+            if((original.group || '') !== val) { 
+                updates.push(userService.updateUser(uid, { group: val }));
+            }
+        });
+        if(updates.length > 0) {
+            await Promise.all(updates);
+            // alert('已更新分組'); // 選擇性提示，避免干擾
+        }
+    }
 }
