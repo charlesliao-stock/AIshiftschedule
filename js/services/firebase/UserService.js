@@ -11,12 +11,11 @@ export const userService = {
         try {
             const q = query(collection(db, "users"));
             const snapshot = await getDocs(q);
-            // ✅ 標準化: uid
+            // ✅ 標準化回傳 uid
             return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
         } catch (error) { console.error("Get All Users Error:", error); throw error; }
     },
 
-    // 根據單位取得使用者
     async getUsersByUnit(unitId) {
         try {
             const q = query(collection(db, "users"), where("unitId", "==", unitId));
@@ -25,7 +24,6 @@ export const userService = {
         } catch (error) { console.error("Get Users By Unit Error:", error); throw error; }
     },
 
-    // 取得單一使用者
     async getUserData(uid) {
         try {
             if (!db) throw new Error("Firestore DB 未初始化");
@@ -41,14 +39,14 @@ export const userService = {
             await updateDoc(doc(db, "users", uid), { lastLoginAt: serverTimestamp() });
         } catch (e) {}
     },
-
-    // 建立新員工 (使用標準欄位)
+    
+    // 建立新人員 (純淨版：只寫入標準欄位)
     async createStaff(data, password) {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, data.email, password);
             const uid = userCredential.user.uid;
             
-            // ✅ 寫入標準欄位: staffName, staffCode
+            // 寫入 Firestore
             await setDoc(doc(db, "users", uid), { 
                 ...data, 
                 // 確保 unitId 存在
@@ -77,7 +75,7 @@ export const userService = {
     async getUnitStaff(unitId) { return this.getUsersByUnit(unitId); },
     async getAllStaffCount() { const list = await this.getAllUsers(); return list.length; },
     
-    // ✅ 標準化搜尋 (移除 name, staffId 舊欄位判斷)
+    // ✅ 搜尋功能 (純淨版：只搜 staffName 與 staffCode)
     async searchUsers(keyword) {
         const list = await this.getAllUsers();
         if (!keyword) return [];
