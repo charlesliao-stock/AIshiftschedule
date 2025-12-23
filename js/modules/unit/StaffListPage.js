@@ -57,7 +57,7 @@ export class StaffListPage {
             // 取得標準介面
             let html = StaffListTemplate.renderLayout(unitOptionsHtml, isRealAdmin, isSelectDisabled);
             
-            // ✅ [工具] 插入「資料修復按鈕」 (僅在開發/維護期使用，確保資料庫欄位正確)
+            // ✅ [工具] 插入「資料修復按鈕」 (僅在開發/維護期使用)
             if (isRealAdmin) {
                 const migrationBtn = `<button id="btn-migration" class="btn btn-warning text-dark fw-bold ms-2"><i class="fas fa-wrench"></i> 修復資料庫欄位</button>`;
                 html = html.replace('新增人員\n                        </button>', '新增人員</button>' + migrationBtn);
@@ -104,21 +104,6 @@ export class StaffListPage {
 
         document.querySelectorAll('th[data-sort]').forEach(th => { th.addEventListener('click', () => this.handleSort(th.dataset.sort)); });
 
-        // ✅ 使用事件委派處理編輯和刪除按鈕
-        const tbody = document.getElementById('staff-tbody');
-        tbody?.addEventListener('click', (e) => {
-            const editBtn = e.target.closest('.btn-edit-staff');
-            const deleteBtn = e.target.closest('.btn-delete-staff');
-            
-            if (editBtn) {
-                const uid = editBtn.dataset.uid;
-                this.openEditModal(uid);
-            } else if (deleteBtn) {
-                const uid = deleteBtn.dataset.uid;
-                this.deleteStaff(uid);
-            }
-        });
-
         if (targetUnitId) await this.loadData(targetUnitId);
     }
 
@@ -142,7 +127,7 @@ export class StaffListPage {
     applySort() {
         if (!this.staffList) this.staffList = [];
         this.displayList = [...this.staffList].sort((a, b) => {
-            // ✅ [潔癖化] 只讀取標準欄位，不相容舊欄位
+            // ✅ [潔癖化] 只讀取標準欄位
             let valA = a[this.sortConfig.key] || '';
             let valB = b[this.sortConfig.key] || '';
             return this.sortConfig.direction === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
@@ -173,7 +158,7 @@ export class StaffListPage {
         if(!user) return;
         
         document.getElementById('edit-uid').value = uid;
-        // ✅ [潔癖化] 只讀取標準欄位，舊資料會變空白，強迫更新
+        // ✅ [潔癖化] 只讀取標準欄位 (如果是舊資料，這裡會是空白，強迫您用修復按鈕)
         document.getElementById('edit-staffName').value = user.staffName || '';
         document.getElementById('edit-staffCode').value = user.staffCode || '';
         
@@ -264,13 +249,13 @@ export class StaffListPage {
                 // 遷移 name -> staffName
                 if (data.name !== undefined) {
                     if (!data.staffName) updates.staffName = data.name;
-                    updates.name = deleteField(); // 刪除舊欄位
+                    updates.name = deleteField();
                     needsUpdate = true;
                 }
                 // 遷移 staffId -> staffCode
                 if (data.staffId !== undefined) {
                     if (!data.staffCode) updates.staffCode = data.staffId;
-                    updates.staffId = deleteField(); // 刪除舊欄位
+                    updates.staffId = deleteField();
                     needsUpdate = true;
                 }
                 
